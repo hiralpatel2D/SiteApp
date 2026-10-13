@@ -20,7 +20,8 @@ export function meRoutes(pools: Pools): Hono<AppEnv> {
     const { rows } = await pools.app.query<MembershipRow>(
       `select company_id, company_name, company_slug, company_status, role_name, membership_status
          from app_user_memberships($1)
-        where membership_status = 'active'`,
+        where membership_status = 'active'
+        order by company_name, company_id`,
       [user.id],
     );
     return c.json({

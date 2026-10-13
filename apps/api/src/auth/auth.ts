@@ -102,13 +102,21 @@ export function createAuth(deps: AuthDeps) {
       ipAddress: { ipAddressHeaders: ['x-client-ip'] },
     },
     hooks: {
-      // Refuse uninvited sign-ups before Better Auth looks the email up, so an
-      // existing account's email gets the same answer as an unknown one.
+      // Public sign-up (an HTTP request to /sign-up/email) is for platform
+      // admin emails only (R11): invited people get accounts through the
+      // invitation-accept endpoint, which calls `auth.api.signUpEmail` server
+      // side (no `request`) after verifying the token. Runs before Better Auth
+      // looks the email up, so an existing account's email gets the same
+      // answer as an unknown one.
       before: createAuthMiddleware(async (ctx) => {
-        if (ctx.path !== '/sign-up/email') return;
+        if (ctx.path !== '/sign-up/email' || !ctx.request) return;
         const email: unknown = (ctx.body as { email?: unknown } | undefined)?.email;
-        if (typeof email !== 'string') return;
-        if (!(await deps.canSignUp(email))) throw inviteOnlyError();
+        if (
+          typeof email !== 'string' ||
+          !config.platformAdminEmails.includes(normaliseEmail(email))
+        ) {
+          throw inviteOnlyError();
+        }
       }),
     },
     databaseHooks: {
@@ -169,7 +177,6 @@ function mapAuthError(
   code: string | undefined,
   message: string | undefined,
 ): { status: ContentfulStatusCode; error: ErrorJson } {
-  const s = status as ContentfulStatusCode;
   if (status === 429) {
     return {
       status: 429,
@@ -214,13 +221,11 @@ function mapAuthError(
       error: { code: 'internal', message: 'Something went wrong. Try again.' },
     };
   }
-  return {
-    status: s,
-    error: {
-      code: code ? code.toLowerCase() : 'error',
-      message: message ?? 'Something went wrong. Try again.',
-    },
-  };
+  // "User already exists": answer as invite-only so sign-up cannot be used to
+  // discover which emails have accounts.
+  if (code?.startsWith('USER_ALREADY_EXISTS')) return { status: 403, error: { ...INVITE_ONLY } };
+  // Any other client error: generic catalogue copy, never Better Auth's text or codes.
+  return { status: 400, error: { code: 'validation_failed', message: VALIDATION_FAILED } };
 }
 
 /**

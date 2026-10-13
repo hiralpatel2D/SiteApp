@@ -3,10 +3,10 @@ import { describe, it, expect, vi } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { createCompany } from '../src/companies/create-company';
 import { invitations, sessions, users } from '../src/db/schema';
-import { makeCanSignUp, normaliseAuthResponse } from '../src/auth/auth';
+import { createAuth, makeCanSignUp, normaliseAuthResponse } from '../src/auth/auth';
 import { consoleEmailSender } from '../src/email/email';
 import { cfg, ownerDb, pools, useTestDb } from './helpers/db';
-import { cookieFrom, req, seedUser, signIn, signUp, testApp } from './helpers/auth';
+import { cookieFrom, recordingEmail, req, seedUser, signIn, signUp, testApp } from './helpers/auth';
 
 useTestDb();
 
@@ -42,6 +42,15 @@ async function invite(
 
 const userCount = async () => (await ownerDb.select().from(users)).length;
 
+/** The auth instance as the invitation-accept endpoint will use it (server-side calls). */
+const serverAuth = () =>
+  createAuth({
+    pools,
+    config: cfg,
+    email: recordingEmail(),
+    canSignUp: makeCanSignUp({ pools, config: cfg }),
+  });
+
 describe('invite-only sign-up', () => {
   it('signup with a random email is refused as invite_only', async () => {
     const { app } = testApp();
@@ -65,7 +74,14 @@ describe('invite-only sign-up', () => {
 
   it('platform admin email can sign up and is flagged', async () => {
     const { app } = testApp();
-    const c = await signUp(app, { email: OWNER, password: PASSWORD, name: 'Owner' });
+    const r = await req(app, '/api/auth/sign-up/email', {
+      body: { email: OWNER, password: PASSWORD, name: 'Owner' },
+    });
+    expect(r.status).toBe(200);
+    const rows = await ownerDb.select().from(users);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.isPlatformAdmin).toBe(true);
+    const c = cookieFrom(r);
     const me = await req(app, '/api/me', { cookie: c });
     expect(me.status).toBe(200);
     const body = (await me.json()) as { user: { email: string; isPlatformAdmin: boolean } };
@@ -88,23 +104,49 @@ describe('invite-only sign-up', () => {
     expect(u!.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
   });
 
-  it('an email with an open invitation can sign up, unflagged', async () => {
+  it('an email with an open invitation cannot use the public sign-up (R11)', async () => {
     await invite('new.hire@x.test');
     const { app } = testApp();
-    const c = await signUp(app, { email: 'New.Hire@x.test', password: PASSWORD, name: 'N' });
-    const me = await req(app, '/api/me', { cookie: c });
-    const body = (await me.json()) as { user: { email: string; isPlatformAdmin: boolean } };
-    expect(body.user).toMatchObject({ email: 'new.hire@x.test', isPlatformAdmin: false });
+    const r = await req(app, '/api/auth/sign-up/email', {
+      body: { email: 'new.hire@x.test', password: PASSWORD, name: 'N' },
+    });
+    expect(r.status).toBe(403);
+    expect(await errorOf(r)).toEqual(INVITE_ONLY);
+    expect(await userCount()).toBe(0);
   });
 
-  it('isPlatformAdmin in the sign-up body is ignored', async () => {
-    await invite('sneaky@x.test');
-    const { app } = testApp();
-    await req(app, '/api/auth/sign-up/email', {
-      body: { email: 'sneaky@x.test', password: PASSWORD, name: 'S', isPlatformAdmin: true },
+  it('a server-side signUpEmail for an invited email succeeds, unflagged', async () => {
+    await invite('new.hire@x.test');
+    const res = await serverAuth().api.signUpEmail({
+      body: { email: 'New.Hire@x.test', password: PASSWORD, name: 'N' },
     });
+    expect(res.user.email).toBe('new.hire@x.test');
     const rows = await ownerDb.select().from(users);
-    expect(rows.every((u) => !u.isPlatformAdmin)).toBe(true);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ email: 'new.hire@x.test', isPlatformAdmin: false });
+    // The account works for normal sign-in.
+    const { app } = testApp();
+    await signIn(app, 'new.hire@x.test', PASSWORD);
+  });
+
+  it('isPlatformAdmin in a sign-up body is ignored', async () => {
+    await invite('sneaky@x.test');
+    // Not allowed by the endpoint's types; smuggle it in as untyped input.
+    const body = { email: 'sneaky@x.test', password: PASSWORD, name: 'S' };
+    Object.assign(body, { isPlatformAdmin: true });
+    await serverAuth().api.signUpEmail({ body });
+    const rows = await ownerDb.select().from(users);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.isPlatformAdmin).toBe(false);
+  });
+
+  it('a server-side signUpEmail without an invitation is refused', async () => {
+    await expect(
+      serverAuth().api.signUpEmail({
+        body: { email: 'random@x.test', password: PASSWORD, name: 'R' },
+      }),
+    ).rejects.toMatchObject({ statusCode: 403, body: { code: 'INVITE_ONLY' } });
+    expect(await userCount()).toBe(0);
   });
 
   it.each([
@@ -113,12 +155,12 @@ describe('invite-only sign-up', () => {
     ['revoked', { revokedAt: new Date() }],
   ])('an %s invitation does not allow sign-up', async (_label, opts) => {
     await invite('late@x.test', opts);
-    const { app } = testApp();
-    const r = await req(app, '/api/auth/sign-up/email', {
-      body: { email: 'late@x.test', password: PASSWORD, name: 'L' },
-    });
-    expect(r.status).toBe(403);
-    expect(await errorOf(r)).toEqual(INVITE_ONLY);
+    await expect(
+      serverAuth().api.signUpEmail({
+        body: { email: 'late@x.test', password: PASSWORD, name: 'L' },
+      }),
+    ).rejects.toMatchObject({ statusCode: 403 });
+    expect(await userCount()).toBe(0);
   });
 
   it('password shorter than 10 is rejected', async () => {
@@ -296,7 +338,12 @@ describe('sign-in and sessions', () => {
     const u = await seedUser({ email: 'u@x.test', password: PASSWORD, name: 'U' });
     const { app } = testApp();
     const c = await signIn(app, 'u@x.test', PASSWORD);
-    await req(app, '/api/auth/update-user', { cookie: c, body: { isPlatformAdmin: true } });
+    const r = await req(app, '/api/auth/update-user', {
+      cookie: c,
+      body: { isPlatformAdmin: true },
+    });
+    expect(r.status).toBe(400);
+    expect((await errorOf(r)).code).toBe('validation_failed');
     const [row] = await ownerDb.select().from(users).where(eq(users.id, u.id));
     expect(row!.isPlatformAdmin).toBe(false);
     const me = await req(app, '/api/me', { cookie: c });
@@ -337,6 +384,30 @@ describe('password reset', () => {
     expect(old.status).toBe(401);
     // Existing sessions are revoked by a reset.
     expect((await req(app, '/api/me', { cookie: oldSession })).status).toBe(401);
+  });
+
+  it('a reset token works only once', async () => {
+    await seedUser({ email: 'u@x.test', password: PASSWORD, name: 'U' });
+    const { app, email } = testApp();
+    await req(app, '/api/auth/request-password-reset', { body: { email: 'u@x.test' } });
+    const resetUrl = (email.sent[0]!.data as { resetUrl: string }).resetUrl;
+    const token = decodeURIComponent(resetUrl.split('?token=')[1]!);
+
+    const first = await req(app, '/api/auth/reset-password', {
+      body: { token, newPassword: 'firstnewpassword1' },
+    });
+    expect(first.status).toBe(200);
+    const second = await req(app, '/api/auth/reset-password', {
+      body: { token, newPassword: 'secondnewpassword2' },
+    });
+    expect(second.status).toBe(400);
+    expect((await errorOf(second)).code).toBe('validation_failed');
+
+    await signIn(app, 'u@x.test', 'firstnewpassword1');
+    const r = await req(app, '/api/auth/sign-in/email', {
+      body: { email: 'u@x.test', password: 'secondnewpassword2' },
+    });
+    expect(r.status).toBe(401);
   });
 
   it('an unknown email gets the same 200 and no email', async () => {
@@ -402,13 +473,26 @@ describe('normaliseAuthResponse', () => {
     expect(await normaliseAuthResponse(original)).toBe(original);
   });
 
-  it('maps unknown 4xx codes to a generic shape without leaking internals', async () => {
+  it('maps unknown 4xx codes to validation_failed without Better Auth text', async () => {
     const res = await normaliseAuthResponse(
       new Response(JSON.stringify({ code: 'SOMETHING_ODD', message: 'odd' }), { status: 422 }),
     );
-    expect(res.status).toBe(422);
-    expect(((await res.json()) as ErrorBody).error.code).toBe('something_odd');
+    expect(res.status).toBe(400);
+    expect(await res.json()).toEqual({
+      error: { code: 'validation_failed', message: 'Check the highlighted fields.' },
+    });
   });
+
+  it.each(['USER_ALREADY_EXISTS', 'USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL'])(
+    'maps %s to invite_only (no account enumeration)',
+    async (code) => {
+      const res = await normaliseAuthResponse(
+        new Response(JSON.stringify({ code, message: 'User already exists.' }), { status: 422 }),
+      );
+      expect(res.status).toBe(403);
+      expect(await res.json()).toEqual({ error: INVITE_ONLY });
+    },
+  );
 });
 
 describe('cookieFrom', () => {
