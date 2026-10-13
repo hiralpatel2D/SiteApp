@@ -17,12 +17,12 @@
     "drizzle-orm": "^0.45.4",
     "hono": "^4.6.0",
     "pg": "^8.23.1",
+    "tsx": "^4.19.0",
     "zod": "^3.25.76"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
     "@types/pg": "^8.23.1",
-    "drizzle-kit": "^0.31.11",
-    "tsx": "^4.19.0"
+    "drizzle-kit": "^0.31.11"
   }
 }
