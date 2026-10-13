@@ -9,7 +9,9 @@ import { errorHandler, notFoundHandler } from './http/errors';
 import { requireSameOrigin } from './http/origin';
 import { invitationRoutes } from './invitations/routes';
 import { platformRoutes } from './platform/routes';
+import { roleRoutes } from './roles/routes';
 import { companyContextRoutes } from './tenant/context';
+import { userRoutes } from './users/routes';
 
 export type AppDeps = {
   checkDb: () => Promise<boolean>;
@@ -48,6 +50,8 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
   api.route('/', companyContextRoutes(deps.pools));
   api.route('/invitations', invitationRoutes({ ...deps, auth }));
   api.route('/platform', platformRoutes(deps));
+  api.route('/users', userRoutes(deps.pools));
+  api.route('/roles', roleRoutes(deps.pools));
   app.route('/api', api);
   return app;
 }
