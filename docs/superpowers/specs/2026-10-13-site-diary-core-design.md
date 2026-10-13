@@ -58,15 +58,15 @@ The owner also shared screenshots of a second app ("Field Ops" style: condensed 
 |---|---|
 | **Company (tenant)** | One construction company. Has a unique workspace slug (e.g. `mehta-infra`), name, logo, plan placeholder. All business data belongs to exactly one company. |
 | **User** | A person with one login (email). May belong to **more than one company** with a different role in each (e.g. Admin at one, Client at another). |
-| **Membership** | Links user ↔ company with a role. |
+| **Membership** | Links user ↔ company with **one role for the whole company**. Roles are not per project *(owner's decision)*. If someone is a PM on one site and an engineer on another, they get one role that covers both; a custom role can fit the mix (§6.3). |
 | **Project** | Belongs to one company. Has a name, a short **project code** (e.g. `RT-PH2`), location, and status. |
 | **Project assignment** | Links a membership to the projects it can see. Super Admin and Admin see all projects in their company. |
-| **Platform admin** | The app owner (above all companies). Can list companies, see usage, suspend a company. Separate from company roles. Minimal UI in this phase. |
+| **Platform admin** | The app owner (above all companies). Creates companies and invites their first Super Admin, lists companies, sees usage, and can suspend a company. Suspending blocks sign-in for that company's users but keeps all its data. Separate from company roles. Minimal UI in this phase. |
 
 ### 6.2 Signup and onboarding flow
 
-1. Visitor signs up with name, email, password, company name. The slug is suggested from the company name and is editable.
-2. The company is created, and this user becomes its **Super Admin**.
+1. **Access is by invitation only. There is no public signup.** The platform admin (app owner) creates a company (name, slug) and invites its first user by email. *(Owner's decision)*
+2. That person accepts the invite, sets a password (unless they already have an account), and becomes the company's **Super Admin**.
 3. Super Admin creates the first project (name, code, location).
 4. Super Admin invites people by email with a role and project(s). The invite link sets a password.
 5. **One global account per person** (email + password), not one per workspace. Sign-in asks for email + password; the workspace field shown in the demo is optional and only pre-selects the company. If a user belongs to several companies and no workspace was given, they pick one after sign-in and can switch later from the side menu. *(Claude's call)*
@@ -78,7 +78,9 @@ Email delivery needs a provider. Builder's call (e.g. Resend), behind an interfa
 
 ### 6.3 Roles
 
-The nine roles come from the v2 design:
+**Companies can create their own custom roles** *(owner's decision)*. Each company starts with nine **system roles**, seeded from the v2 design. Super Admin can edit their permissions, except where §6.4's lockout guard applies. Super Admin and Admin can also create, rename and delete **custom roles** (e.g. "Safety Officer", "Quantity Surveyor") and tick their capabilities in the Permission Matrix. System roles can't be deleted, and Super Admin can't be renamed. A role can't be deleted while members hold it; they must be moved to another role first.
+
+The nine system roles:
 
 | Role | Scope summary (default permissions; editable per company in the Permission Matrix) |
 |---|---|
@@ -95,7 +97,7 @@ The nine roles come from the v2 design:
 ### 6.4 Permission model
 
 - Permissions are **named capabilities** per module and action, e.g. `indent.create`, `indent.approve`, `stock.view`, `users.manage`.
-- Each company has a **permission matrix**: role × capability → allowed. It's seeded with the defaults above, and Super Admin can edit it (the "Permission Matrix" screen in the v2 menu).
+- Each company has a **permission matrix**: role × capability → allowed. It covers system and custom roles, is seeded with the defaults above, and is edited by users holding `roles.manage` (the "Permission Matrix" screen in the v2 menu). Changes take effect on the user's next request. Changes are written to the audit log.
 - The server checks capabilities on every request. The client receives the user's effective capabilities at sign-in and uses them **only** to hide or disable UI. That is a convenience, not security.
 - Module tiles appear only if the user has that module's `.view` capability (the demo's "View as" control shows this).
 - **Seeded in this phase:** full capabilities for core areas (`users.*`, `roles.*`, `projects.*`, `audit.view`, `company.*`), plus a `<module>.view` capability for each of the twelve module tiles: attendance, manpower, hindrance, indent, stock, inward, outward, drawings, equipment, safety, report, insights. Each module's detailed actions are added when that module is built. *(Claude's call)*
@@ -154,7 +156,7 @@ SiteApp/
 
 ### 7.5 Data model (core tables only)
 
-`companies`, `users`, `memberships` (user, company, role), `projects` (company, name, code, location, status), `project_assignments` (membership, project), `roles` (seeded per company), `role_capabilities` (permission matrix), `invitations`, `audit_log` (company, user, action, entity, entity_id, before/after JSON, timestamp), plus Better Auth's own session tables.
+`companies`, `users`, `memberships` (user, company, role), `projects` (company, name, code, location, status), `project_assignments` (membership, project), `roles` (per company: `is_system` flag for the nine seeded roles, plus custom roles), `role_capabilities` (permission matrix), `invitations`, `audit_log` (company, user, action, entity, entity_id, before/after JSON, timestamp), plus Better Auth's own session tables.
 
 All primary keys are UUIDv7 (time-ordered, client-generatable; see §9). Every row has `created_at`, `updated_at`, `created_by`, `updated_by`. Every user-visible entity has a human reference, either a code (projects) or a per-company sequence (later modules, e.g. `IND-0142`).
 
@@ -170,7 +172,7 @@ The **audit log** is written by the API for every create, update and delete from
 - **Bottom tabs:** Today, Progress, Notes, Alerts (placeholder content OK) with sliding indicator and badge.
 - **Side menu:** Display (Glove mode, Sunlight), Masters, Access Control (Permission Matrix, Users & Roles), Project settings, Records (Audit Log, …), company switcher, Sign out. Items for modules not yet built go to a "Coming soon" placeholder.
 - **Module page:** a generic module scaffold (hero, stats row, entries list, "New entry" floating button, bottom-sheet form) that real modules will reuse.
-- **Working screens in this phase:** sign up, sign in, company picker, invite accept, Users & Roles (list, invite, change role, deactivate), Permission Matrix (view and edit), Projects (list, create, edit, assign users), Audit Log (list, filter by user/date), profile.
+- **Working screens in this phase:** sign in, company picker, invite accept, Users & Roles (list, invite, change role, deactivate), Roles (create, rename, delete custom roles), Permission Matrix (view and edit, system and custom roles), Platform admin (create company + invite Super Admin, list, suspend), Projects (list, create, edit, assign users), Audit Log (list, filter by user/date), profile.
 
 ### 8.2 Design tokens and themes
 
@@ -214,7 +216,7 @@ So that offline capture can be added later without a rewrite:
 
 ## 10. Quality bar
 
-- **CI on every PR:** lint (ESLint), format (Prettier), typecheck, unit tests (Vitest), API integration tests against a real Postgres (tenant isolation suite required), and a Playwright smoke test (sign up → create project → invite → sign in as invitee → see shell).
+- **CI on every PR:** lint (ESLint), format (Prettier), typecheck, unit tests (Vitest), API integration tests against a real Postgres (tenant isolation suite required), and a Playwright smoke test (platform admin creates company → Super Admin accepts invite → creates project and a custom role → invites a user → invitee signs in and sees only the tiles their role allows).
 - **Accessibility:** keyboard reachable, visible focus, WCAG AA contrast in all theme × mode combinations (sunlight mode targets AAA), and labels on all controls.
 - **Performance:** first load of the shell under ~200KB JS gzipped on the Today screen; Lighthouse PWA installable.
 - **Phone-width check:** no clipped or wrapping button labels at 360px width.
@@ -232,7 +234,10 @@ So that offline capture can be added later without a rewrite:
 | Offline | Online-only first, built ready for offline |
 | Stack | Left to Claude (choices in §7.1 are Claude's recommendation; owner accepted) |
 | Theme | Field Ops is the default; Swiss v2 kept as a switchable theme |
-| Process | A demo for confirmation before implementing changes |
+| Process | The approved motion demo is the visual reference. **No further demo per milestone.** A new demo is needed only if the look and feel itself is to change. *(Claude's reading of "4: No"; owner to confirm.)* |
+| Signup | Invite-only. The platform admin creates companies; no public signup |
+| Roles | One role per person per company (not per project) |
+| Custom roles | Yes. Companies can create their own roles on top of the nine system roles |
 
 ## 12. Calls made by Claude (owner to check)
 
