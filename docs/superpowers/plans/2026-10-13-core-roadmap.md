@@ -28,3 +28,23 @@ The core spec covers several subsystems, so it is built as **three plans in sequ
 - Data layer `apps/web/src/data/` (TanStack Query hooks, client UUIDv7 IDs, idempotency keys, version-checked updates), set up ready for offline.
 - Styled screens: sign-in, company picker, invite accept, Users & Roles, Roles, Permission Matrix, Projects, Audit Log, profile, platform admin.
 - Playwright end-to-end smoke from spec §10, accessibility checks (axe), and a 360px no-clipping check.
+
+## Carry-over from Plan 1 reviews (fold into Plan 2 / 3)
+
+Non-blocking items found by the Plan 1 task reviews and final review. Plan 2 and Plan 3 should pick these up where they touch the same code.
+
+**Plan 2 (identity & access)**
+- Make `audit_log` append-only for `app_user` (INSERT + SELECT only).
+- Extract one shared `unwrapDbError` helper; today it is duplicated in `apps/api/src/db/tenant.ts` and `apps/api/src/companies/create-company.ts`.
+- Error handler: map HTTPException statuses to proper codes (401/403/404/405 are currently labelled `bad_request`; a 503 from inside the API currently comes back as a 500). Also narrow `AppError.status` to Hono's status type, and add tests for the `AppError` branch.
+- Validate and trim the company `name` at the platform-admin endpoint.
+- Add an explicit `REVOKE CREATE ON SCHEMA public FROM PUBLIC` in `rls.sql`.
+- Graceful shutdown on SIGTERM: close the DB pools and handle EADDRINUSE.
+- Production web proxy: add `x-forwarded-for` / `x-forwarded-proto`, and send `accept-encoding: identity` upstream. Auth rate limiting needs the client IP.
+
+**Plan 3 (shell & motion)**
+- ThemeProvider: add tests for an OS colour-scheme flip and for a stored preference read on mount; move `writeStoredTheme` out of the state updater.
+- Reduced motion: use `transition: none` rather than 1ms.
+- Use a separate maskable PWA icon with safe-zone padding.
+- `server.mjs`: add MIME types for jpeg/webp/gif/avif, and add tests for query strings, path traversal, `/api` 404 passthrough and redirects.
+- Brand orange with white text only reaches 3.58:1. It may be used for large or bold text (≥19px bold) and icons, never for small text on an orange fill (pinned by `apps/web/test/contrast.test.ts`).
