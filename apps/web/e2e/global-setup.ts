@@ -19,11 +19,33 @@ const TABLES = [
   'users',
 ];
 
+const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
+
+/** Refuses to truncate anything but a local database whose name ends in `_test`. */
+function assertLocalTestDatabase(url: string): void {
+  let host = '';
+  let name = '';
+  try {
+    const u = new URL(url);
+    host = u.hostname.toLowerCase();
+    name = decodeURIComponent(u.pathname.replace(/^\//, ''));
+  } catch {
+    // Unparseable: falls through to the refusal below.
+  }
+  if (!LOCAL_HOSTS.has(host) || !name.endsWith('_test')) {
+    throw new Error(
+      `e2e refuses to empty this database: MIGRATION_DATABASE_URL must point at a local ` +
+        `database whose name ends in _test (got host "${host}", database "${name}").`,
+    );
+  }
+}
+
 export default async function globalSetup(): Promise<void> {
   const envFile = fileURLToPath(new URL('../../api/.env.test', import.meta.url));
   if (existsSync(envFile)) process.loadEnvFile(envFile);
   const url = process.env.MIGRATION_DATABASE_URL;
   if (!url) throw new Error('e2e needs MIGRATION_DATABASE_URL (run scripts/test-db.sh start)');
+  assertLocalTestDatabase(url);
   const client = new pg.Client({ connectionString: url });
   await client.connect();
   try {

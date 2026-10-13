@@ -6,6 +6,8 @@ import { VitePWA } from 'vite-plugin-pwa';
 
 // Dev and preview serve the app and the API from one origin, as production does
 // (apps/web/server.mjs), so cookies and the API's Origin check just work.
+// Dev and e2e only: this proxy forwards a client-sent x-client-ip unchanged, so
+// it is spoofable. Production uses server.mjs, which overwrites that header.
 const apiProxy = { '/api': { target: process.env.API_URL || 'http://localhost:3000' } };
 
 export default defineConfig({

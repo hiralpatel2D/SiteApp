@@ -40,9 +40,11 @@ function Home() {
           void navigate({ to: '/', replace: true });
           return;
         }
-        // Not a member any more, suspended, or no company: make them choose again.
-        if (err instanceof ApiError && (err.status === 403 || err.status === 400)) {
+        // Not a member any more, suspended, unknown or no company: choose again.
+        if (err instanceof ApiError && [400, 403, 404].includes(err.status)) {
           setActiveCompany(null);
+          void navigate({ to: '/companies', replace: true });
+          return;
         }
         setError(errorMessage(err));
       },
