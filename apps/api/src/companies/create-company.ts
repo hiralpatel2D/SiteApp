@@ -6,6 +6,7 @@ import {
   type SystemRoleKey,
 } from '@sitediary/shared';
 import type { Db } from '../db/pools';
+import type { AppTx } from '../db/tenant';
 import { auditLog, companies, roleCapabilities, roles } from '../db/schema';
 import { isUniqueViolation } from '../db/errors';
 import { AppError } from '../http/errors';
@@ -18,18 +19,20 @@ const SLUG_UNIQUE = 'companies_slug_unique';
 /**
  * Creates a company with its nine system roles, their default capabilities and
  * an audit entry, in one owner transaction (owner connection bypasses RLS).
+ * Given an owner transaction instead of a Db it runs as a savepoint inside it,
+ * so the caller can add more work that commits or rolls back with the company.
+ * `actorId` is the platform admin recorded on the audit entry.
  */
 export async function createCompany(
-  ownerDb: Db,
+  ownerDb: Db | AppTx,
   input: CreateCompanyInput,
+  opts: { actorId?: string } = {},
 ): Promise<CreateCompanyResult> {
   const parsed = slugSchema.safeParse(input.slug);
   if (!parsed.success) {
-    throw new AppError(
-      400,
-      'invalid_slug',
-      parsed.error.issues[0]?.message ?? 'Workspace name is not valid.',
-    );
+    throw new AppError(400, 'validation_failed', 'Check the highlighted fields.', {
+      slug: parsed.error.issues[0]?.message ?? 'Workspace name is not valid.',
+    });
   }
   const slug = parsed.data;
   const companyId = newId();
@@ -65,6 +68,8 @@ export async function createCompany(
         action: 'company.created',
         entity: 'company',
         entityId: companyId,
+        userId: opts.actorId ?? null,
+        createdBy: opts.actorId ?? null,
         after: { name: input.name, slug },
       });
     });

@@ -8,6 +8,7 @@ import type { EmailSender } from './email/email';
 import { errorHandler, notFoundHandler } from './http/errors';
 import { requireSameOrigin } from './http/origin';
 import { invitationRoutes } from './invitations/routes';
+import { platformRoutes } from './platform/routes';
 import { companyContextRoutes } from './tenant/context';
 
 export type AppDeps = {
@@ -46,6 +47,7 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
   api.route('/', meRoutes(deps.pools));
   api.route('/', companyContextRoutes(deps.pools));
   api.route('/invitations', invitationRoutes({ ...deps, auth }));
+  api.route('/platform', platformRoutes(deps));
   app.route('/api', api);
   return app;
 }
