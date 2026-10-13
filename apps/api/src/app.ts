@@ -7,8 +7,10 @@ import type { Pools } from './db/pools';
 import type { EmailSender } from './email/email';
 import { errorHandler, notFoundHandler } from './http/errors';
 import { requireSameOrigin } from './http/origin';
+import { auditRoutes } from './audit/routes';
 import { invitationRoutes } from './invitations/routes';
 import { platformRoutes } from './platform/routes';
+import { projectRoutes } from './projects/routes';
 import { roleRoutes } from './roles/routes';
 import { companyContextRoutes } from './tenant/context';
 import { userRoutes } from './users/routes';
@@ -52,6 +54,8 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
   api.route('/platform', platformRoutes(deps));
   api.route('/users', userRoutes(deps.pools));
   api.route('/roles', roleRoutes(deps.pools));
+  api.route('/projects', projectRoutes(deps.pools));
+  api.route('/audit', auditRoutes(deps.pools));
   app.route('/api', api);
   return app;
 }

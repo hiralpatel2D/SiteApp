@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { CAPABILITIES, type Capability } from './capabilities';
+import { projectCodeSchema } from './slug';
 
 /**
  * Request body schemas shared by the API (validation) and the web app (forms).
@@ -66,3 +67,69 @@ export const updateUserBodySchema = z.object({
     .optional(),
 });
 export type UpdateUserBody = z.infer<typeof updateUserBodySchema>;
+
+export const PROJECT_STATUSES = ['active', 'archived'] as const;
+export type ProjectStatus = (typeof PROJECT_STATUSES)[number];
+
+const projectNameSchema = z
+  .string({ message: 'Enter a project name.' })
+  .trim()
+  .min(2, 'Project name must be at least 2 characters.')
+  .max(80, 'Project name must be 80 characters or fewer.');
+
+const projectLocationSchema = z
+  .string({ message: 'Enter a location.' })
+  .trim()
+  .max(200, 'Location must be 200 characters or fewer.')
+  .transform((v) => (v === '' ? null : v));
+
+/** `POST /api/projects`. */
+export const createProjectBodySchema = z.object({
+  name: projectNameSchema,
+  code: projectCodeSchema,
+  location: projectLocationSchema.optional(),
+});
+export type CreateProjectBody = z.infer<typeof createProjectBodySchema>;
+
+/** `PATCH /api/projects/:id`. */
+export const updateProjectBodySchema = z.object({
+  version: versionField,
+  name: projectNameSchema.optional(),
+  code: projectCodeSchema.optional(),
+  location: projectLocationSchema.nullable().optional(),
+  status: z.enum(PROJECT_STATUSES, { message: 'Choose active or archived.' }).optional(),
+});
+export type UpdateProjectBody = z.infer<typeof updateProjectBodySchema>;
+
+/** `PUT /api/projects/:id/members`: replaces the project's assignments. */
+export const setProjectMembersBodySchema = z.object({
+  membershipIds: z
+    .array(z.string().uuid('Choose people from the list.'), {
+      message: 'Choose people from the list.',
+    })
+    .max(1000, 'Too many people.')
+    .transform((ids) => [...new Set(ids.map((id) => id.toLowerCase()))]),
+});
+export type SetProjectMembersBody = z.infer<typeof setProjectMembersBodySchema>;
+
+const isoDateField = (message: string) =>
+  z
+    .string({ message })
+    .regex(/^\d{4}-\d{2}-\d{2}([T ][\d:.]+(Z|[+-]\d{2}:?\d{2})?)?$/, message)
+    .refine((v) => !Number.isNaN(Date.parse(v)), message);
+
+/** `GET /api/audit` query. `before` is the opaque cursor from a previous page. */
+export const auditQuerySchema = z.object({
+  userId: z.string().uuid('Choose a person from the list.').optional(),
+  entity: z.string().trim().min(1, 'Enter an entity.').max(64, 'Entity is too long.').optional(),
+  from: isoDateField('Enter a valid date.').optional(),
+  to: isoDateField('Enter a valid date.').optional(),
+  before: z.string().min(1, 'Invalid cursor.').max(200, 'Invalid cursor.').optional(),
+  limit: z.coerce
+    .number({ message: 'Limit must be between 1 and 100.' })
+    .int('Limit must be between 1 and 100.')
+    .min(1, 'Limit must be between 1 and 100.')
+    .max(100, 'Limit must be between 1 and 100.')
+    .default(50),
+});
+export type AuditQuery = z.infer<typeof auditQuerySchema>;

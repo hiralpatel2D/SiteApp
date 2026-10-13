@@ -59,6 +59,7 @@ export const projects = pgTable(
     status: text('status').notNull().default('active'),
   },
   (t) => [
+    check('projects_status_check', sql`${t.status} in ('active', 'archived')`),
     unique('projects_company_id_code_unique').on(t.companyId, t.code),
     // Target for composite FKs (project_assignments) pinning same-company references.
     unique('projects_company_id_id_unique').on(t.companyId, t.id),
