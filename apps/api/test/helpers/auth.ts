@@ -5,7 +5,8 @@ import { createApp, type AppDeps } from '../../src/app';
 import { createAuth } from '../../src/auth/auth';
 import type { Config } from '../../src/config';
 import type { EmailSender } from '../../src/email/email';
-import { accounts, users } from '../../src/db/schema';
+import type { SystemRoleKey } from '@sitediary/shared';
+import { accounts, memberships, users } from '../../src/db/schema';
 import { cfg, ownerDb, pools } from './db';
 
 type Hono = ReturnType<typeof createApp>;
@@ -157,4 +158,65 @@ export async function seedUser(input: {
     password: await hashPassword(input.password),
   });
   return { id, email };
+}
+
+/**
+ * Seeds a user plus a membership in `companyId` as the owner role. `role` is a
+ * system role key (resolved against the company's roles) or a role id. Signs in
+ * to return a session cookie unless `opts.signIn` is false.
+ */
+export async function seedMember(
+  companyId: string,
+  role: SystemRoleKey | string,
+  email: string,
+  opts: {
+    password?: string;
+    name?: string;
+    status?: 'active' | 'deactivated';
+    isPlatformAdmin?: boolean;
+    signIn?: boolean;
+    app?: Hono;
+  } = {},
+): Promise<{
+  userId: string;
+  membershipId: string;
+  email: string;
+  password: string;
+  cookie?: string;
+}> {
+  const password = opts.password ?? 'longpassword1';
+  const u = await seedUser({
+    email,
+    password,
+    name: opts.name ?? email.split('@')[0]!,
+    isPlatformAdmin: opts.isPlatformAdmin,
+  });
+  const roleId = await resolveRoleId(companyId, role);
+  const membershipId = newId();
+  await ownerDb.insert(memberships).values({
+    id: membershipId,
+    companyId,
+    userId: u.id,
+    roleId,
+    status: opts.status ?? 'active',
+  });
+  const out = { userId: u.id, membershipId, email: u.email, password } as {
+    userId: string;
+    membershipId: string;
+    email: string;
+    password: string;
+    cookie?: string;
+  };
+  if (opts.signIn !== false)
+    out.cookie = await signIn(opts.app ?? testApp().app, u.email, password);
+  return out;
+}
+
+async function resolveRoleId(companyId: string, role: string): Promise<string> {
+  const { rows } = await pools.owner.query<{ id: string }>(
+    'select id from roles where company_id = $1 and (key = $2 or id::text = $2) limit 1',
+    [companyId, role],
+  );
+  if (!rows[0]) throw new Error(`seedMember: no role ${role} in company ${companyId}`);
+  return rows[0].id;
 }
