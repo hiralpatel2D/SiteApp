@@ -10,23 +10,23 @@ You do this once. It takes about 20 minutes. You need a Railway account and acce
 
 ## Steps
 
-1. Sign in to Railway and click **New Project**, then **Deploy from GitHub repo**, and pick `hiralpatel2D/SiteApp`. If Railway starts a service automatically, you will rename it in step 4.
-2. In the project, click **New**, then **Database**, then **Add PostgreSQL**. Wait for it to turn green.
-3. Click **New**, then **GitHub Repo**, and pick `hiralpatel2D/SiteApp` a second time. You now have two services from this repo.
+1. Sign in to Railway and click **New Project**, then **Empty Project**. (Do not pick "Deploy from GitHub repo" here; you add the services yourself below so there are no stray extras.)
+2. In the project, click **New**, then **Database**, then **Add PostgreSQL**. Wait for it to turn green. Keep its name as `Postgres`, because the variables below refer to it.
+3. Click **New**, then **GitHub Repo**, and pick `hiralpatel2D/SiteApp`. Do this twice, so you have two services from this repo.
 4. Rename them so they are easy to tell apart (click the service, **Settings**, **Service Name**): call one `api` and the other `web`. The names must be exactly `api` and `web`, because step 7 refers to them.
 5. For each service open **Settings** and set:
    - **Root Directory**: `/` (leave it as the repository root).
    - **Config as Code** (Railway calls it "Config File Path"): `/apps/api/railway.json` for `api`, and `/apps/web/railway.json` for `web`.
-6. Open the `api` service, go to **Variables**, and add these three:
-   - `MIGRATION_DATABASE_URL`: the database address used to set up and update the tables. It must be Railway's `postgres` superuser URL. Copy it from the Postgres service, **Variables**, `DATABASE_URL` (the one that starts with `postgresql://postgres:`). Use the private one (host ending `.railway.internal`).
-   - `DATABASE_URL`: the address the running app uses, with the limited `app_user` account. Take the same URL as above and replace `postgres` (the user name) with `app_user`, and the password with the value you choose for `APP_DB_PASSWORD`. Host, port, and database name stay the same. Example shape: `postgresql://app_user:YOUR_APP_DB_PASSWORD@HOST:PORT/railway`.
-   - `APP_DB_PASSWORD`: a long random password you invent. Use letters and digits only, 32 or more characters (for example `k8Jd2mQ7...`). Do not use symbols such as `@ / : # %`, because the password is placed inside the `DATABASE_URL` web address and symbols break it. (If you must use symbols, URL-encode them in `DATABASE_URL`.) The first deploy creates the `app_user` account with this password, so it must match the password inside `DATABASE_URL`.
+6. Open the `api` service, go to **Variables**, and add these four. Type them exactly as shown, including the `${{ ... }}` parts: Railway fills those in by itself, and it fills in the right values again in the staging copy, so you never paste a database address.
+   - `PORT`: `3001`
+   - `APP_DB_PASSWORD`: a long random password you invent. Use letters and digits only, 32 or more characters (for example `k8Jd2mQ7...`). Do not use symbols such as `@ / : # %`, because the password goes inside a web address and symbols break it. The first deploy creates the limited `app_user` account with this password.
+   - `MIGRATION_DATABASE_URL`: `${{Postgres.DATABASE_URL}}` (the address used to set up and update the tables, as Railway's `postgres` superuser).
+   - `DATABASE_URL`: `postgresql://app_user:${{APP_DB_PASSWORD}}@${{Postgres.PGHOST}}:${{Postgres.PGPORT}}/${{Postgres.PGDATABASE}}` (the address the running app uses, with the limited `app_user` account).
 7. Open the `web` service, go to **Variables**, and add:
    - `API_INTERNAL_URL`: tells the website where the `api` lives inside Railway. Enter exactly: `http://${{api.RAILWAY_PRIVATE_DOMAIN}}:${{api.PORT}}`
-8. Make sure `api` also has a variable `PORT` set to `3001` (otherwise the line above will not resolve).
-9. Create the staging copy: at the top of the project click the environment name (usually **production**), choose **New Environment**, name it `staging`, and duplicate from production. Repeat steps 6 and 7 inside `staging` if Railway did not copy the variables, and give staging its own `APP_DB_PASSWORD`.
-10. Deploy: open each service and click **Deploy** (or push a change to the repository). Deploy `api` first, wait until it shows **Active**, then `web`.
-11. Open the `web` service, **Settings**, **Networking**, and click **Generate Domain**. Do this for `web` only. Do not give `api` a public domain; it should stay private.
+8. Create the staging copy: at the top of the project click the environment name (usually **production**), choose **New Environment**, name it `staging`, and duplicate from production. Then open `api`, **Variables**, inside `staging` and change only `APP_DB_PASSWORD` to a different password. Everything else follows automatically.
+9. Deploy: open each service and click **Deploy** (or push a change to the repository). Deploy `api` first, wait until it shows **Active**, then `web`. Do the same in `staging`.
+10. Open the `web` service, **Settings**, **Networking**, and click **Generate Domain**. Do this for `web` only. Do not give `api` a public domain; it should stay private.
 
 ## Check that it worked
 
@@ -35,11 +35,12 @@ You do this once. It takes about 20 minutes. You need a Railway account and acce
 
 If the health page shows an error, open the `api` service, then **Deployments**, then **View Logs**, and send the last few lines to your developer.
 
-## The four variables in one place
+## The variables in one place
 
 | Variable                 | Service | What it is                                                           |
 | ------------------------ | ------- | -------------------------------------------------------------------- |
-| `MIGRATION_DATABASE_URL` | api     | Railway's `postgres` superuser URL; used only to set up the tables   |
-| `DATABASE_URL`           | api     | Same database, but signed in as `app_user`; used while the app runs  |
-| `APP_DB_PASSWORD`        | api     | The password given to `app_user`; must match the one in the URL      |
+| `PORT`                   | api     | `3001`; the `web` service uses it to find `api`                      |
+| `MIGRATION_DATABASE_URL` | api     | `${{Postgres.DATABASE_URL}}`; used only to set up the tables         |
+| `DATABASE_URL`           | api     | Same database as `app_user`, built from the Postgres variables       |
+| `APP_DB_PASSWORD`        | api     | The password given to `app_user`; the URL picks it up automatically |
 | `API_INTERNAL_URL`       | web     | Private address of `api`: `http://${{api.RAILWAY_PRIVATE_DOMAIN}}:${{api.PORT}}` |
