@@ -8,3 +8,4 @@ test-results
 pnpm-lock.yaml
 docs
 apps/api/drizzle
+apps/web/src/routeTree.gen.ts

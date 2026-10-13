@@ -13,6 +13,7 @@ export default tseslint.config(
       '**/test-results/**',
       '**/.pgdata/**',
       '.superpowers/**',
+      'apps/web/src/routeTree.gen.ts',
     ],
   },
   js.configs.recommended,

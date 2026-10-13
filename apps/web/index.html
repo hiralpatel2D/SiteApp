@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#e8590c" />
+    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <title>Site Diary</title>
+    <script>
+      // Set theme before first paint. Mirrors readStoredTheme/resolveMode in src/theme/theme.ts.
+      (function () {
+        var theme = 'field-ops';
+        var pref = 'system';
+        try {
+          var s = JSON.parse(localStorage.getItem('sd.theme') || 'null');
+          if (s && (s.theme === 'field-ops' || s.theme === 'swiss-v2')) theme = s.theme;
+          if (s && ['system', 'light', 'dark', 'sun'].indexOf(s.mode) !== -1) pref = s.mode;
+        } catch (e) {}
+        var dark = false;
+        try {
+          dark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        } catch (e) {}
+        var root = document.documentElement;
+        root.dataset.theme = theme;
+        root.dataset.mode = pref === 'system' ? (dark ? 'dark' : 'light') : pref;
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
