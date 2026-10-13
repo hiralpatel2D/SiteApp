@@ -112,11 +112,18 @@ export const setProjectMembersBodySchema = z.object({
 });
 export type SetProjectMembersBody = z.infer<typeof setProjectMembersBodySchema>;
 
+const ISO_RE =
+  /^(\d{4})-(\d{2})-(\d{2})(?:[T ]([01]\d|2[0-3]):([0-5]\d)(?::([0-5]\d)(?:\.\d{1,6})?)?(?:Z|[+-](?:[01]\d|2[0-3]):?[0-5]\d)?)?$/;
+
+/** Strict ISO date or date-time; the calendar date must exist (no 2026-02-31). */
 const isoDateField = (message: string) =>
-  z
-    .string({ message })
-    .regex(/^\d{4}-\d{2}-\d{2}([T ][\d:.]+(Z|[+-]\d{2}:?\d{2})?)?$/, message)
-    .refine((v) => !Number.isNaN(Date.parse(v)), message);
+  z.string({ message }).refine((v) => {
+    const m = ISO_RE.exec(v);
+    if (!m) return false;
+    const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
+    const dt = new Date(Date.UTC(y, mo - 1, d));
+    return dt.getUTCFullYear() === y && dt.getUTCMonth() === mo - 1 && dt.getUTCDate() === d;
+  }, message);
 
 /** `GET /api/audit` query. `before` is the opaque cursor from a previous page. */
 export const auditQuerySchema = z.object({

@@ -47,6 +47,11 @@ export function auditRoutes(pools: Pools): Hono<AppEnv> {
     const cursor = q.before ? decodeCursor(q.before) : undefined;
     const t = c.get('tenant');
     const dateOnly = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v);
+    // Zone-less values are UTC, whatever the DB session timezone is.
+    const instant = (v: string) =>
+      /(Z|[+-]\d{2}:?\d{2})$/.test(v) && v.length > 10
+        ? sql`${v}::timestamptz`
+        : sql`(${v}::timestamp at time zone 'utc')`;
 
     const rows = await runInTenant(c, async (tx) => {
       const res = await tx.execute<Row & { cursorAt: string }>(sql`
@@ -59,12 +64,12 @@ export function auditRoutes(pools: Pools): Hono<AppEnv> {
          where a.company_id = ${t.companyId}
            ${q.userId ? sql`and a.user_id = ${q.userId}` : sql``}
            ${q.entity ? sql`and a.entity = ${q.entity}` : sql``}
-           ${q.from ? sql`and a.created_at >= ${q.from}::timestamptz` : sql``}
+           ${q.from ? sql`and a.created_at >= ${instant(q.from)}` : sql``}
            ${
              q.to
                ? dateOnly(q.to)
-                 ? sql`and a.created_at < (${q.to}::date + 1)::timestamptz`
-                 : sql`and a.created_at <= ${q.to}::timestamptz`
+                 ? sql`and a.created_at < ((${q.to}::date + 1)::timestamp at time zone 'utc')`
+                 : sql`and a.created_at <= ${instant(q.to)}`
                : sql``
            }
            ${

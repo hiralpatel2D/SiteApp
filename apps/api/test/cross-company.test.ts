@@ -19,6 +19,9 @@ describe('cross-company id sweep', () => {
     const bRole = (await ownerDb.select().from(roles)).find(
       (r) => r.companyId === b.companyId && r.key === 'admin',
     )!;
+    const aRole = (await ownerDb.select().from(roles)).find(
+      (r) => r.companyId === a.companyId && r.key === 'site_engineer',
+    )!;
     const bCustomRole = newId();
     await ownerDb.insert(roles).values({
       id: bCustomRole,
@@ -50,6 +53,14 @@ describe('cross-company id sweep', () => {
       ['PATCH', `/api/projects/${bProject}`, { version: 1, name: 'Hijacked' }],
       ['PUT', `/api/projects/${bProject}/members`, { membershipIds: [] }],
       ['DELETE', `/api/invitations/${bInvitation}`, undefined],
+      ['PATCH', `/api/users/${aAdmin.membershipId}`, { version: 1, roleId: bRole.id }],
+      ['PATCH', `/api/users/${aAdmin.membershipId}`, { version: 1, projectIds: [bProject] }],
+      ['POST', '/api/invitations', { email: 'new@alpha.test', roleId: bRole.id, projectIds: [] }],
+      [
+        'POST',
+        '/api/invitations',
+        { email: 'new2@alpha.test', roleId: aRole.id, projectIds: [bProject] },
+      ],
       ['PUT', `/api/projects/${aProject}/members`, { membershipIds: [bMember.membershipId] }],
     ];
     for (const [method, path, body] of cases) {

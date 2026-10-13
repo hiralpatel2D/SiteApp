@@ -121,4 +121,37 @@ describe('GET /api/audit', () => {
       );
     }
   });
+
+  it('2026-02-31 is a 400 with details on the field', async () => {
+    const ctx = await setup();
+    const r = await get(ctx, '?from=2026-02-31&to=2026-02-31');
+    expect(r.status).toBe(400);
+    const e = ((await r.json()) as { error: { details: Record<string, string> } }).error;
+    expect(Object.keys(e.details).sort()).toEqual(['from', 'to']);
+  });
+
+  it('pages across rows with identical created_at without skipping or duplicating', async () => {
+    const ctx = await setup();
+    const at = new Date(Date.UTC(2027, 0, 1));
+    const ids = Array.from({ length: 7 }, () => newId());
+    await ownerDb.insert(auditLog).values(
+      ids.map((id) => ({
+        id,
+        companyId: ctx.co.companyId,
+        action: 'tie.row',
+        entity: 'tie',
+        createdAt: at,
+      })),
+    );
+    const seen: string[] = [];
+    let cursor: string | null = null;
+    do {
+      const qs: string = `?entity=tie&limit=3${cursor ? `&before=${encodeURIComponent(cursor)}` : ''}`;
+      const page = (await (await get(ctx, qs)).json()) as Page;
+      seen.push(...page.items.map((i) => i.id));
+      cursor = page.nextCursor;
+    } while (cursor);
+    expect(seen).toHaveLength(7);
+    expect(new Set(seen)).toEqual(new Set(ids));
+  });
 });
