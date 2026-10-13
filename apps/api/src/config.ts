@@ -7,6 +7,8 @@ export type Config = {
   databaseUrl: string;
   /** Migration connection (schema owner role). */
   migrationDatabaseUrl: string;
+  /** Password migrations set on the restricted app_user role. */
+  appDbPassword: string;
 };
 
 const schema = z.object({
@@ -14,6 +16,7 @@ const schema = z.object({
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
   DATABASE_URL: z.string().min(1),
   MIGRATION_DATABASE_URL: z.string().min(1),
+  APP_DB_PASSWORD: z.string().min(1),
 });
 
 export function loadConfig(env: Record<string, string | undefined>): Config {
@@ -30,5 +33,6 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
     port: e.PORT,
     databaseUrl: e.DATABASE_URL,
     migrationDatabaseUrl: e.MIGRATION_DATABASE_URL,
+    appDbPassword: e.APP_DB_PASSWORD,
   };
 }

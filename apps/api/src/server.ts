@@ -1,6 +1,7 @@
 import { serve } from '@hono/node-server';
 import { loadConfig } from './config';
 import { createApp } from './app';
+import { createPools } from './db/pools';
 
 let config;
 try {
@@ -10,8 +11,17 @@ try {
   process.exit(1);
 }
 
-// TODO(Task 4): replace with a real Postgres ping via the Drizzle client.
-const checkDb = async (): Promise<boolean> => false;
+const pools = createPools(config);
+
+// Health ping on the restricted app pool (the connection requests actually use).
+const checkDb = async (): Promise<boolean> => {
+  try {
+    await pools.app.query('select 1');
+    return true;
+  } catch {
+    return false;
+  }
+};
 
 const app = createApp({ checkDb });
 serve({ fetch: app.fetch, port: config.port }, (info) => {
