@@ -3,7 +3,7 @@ import type { FormEvent } from 'react';
 import { ThemeSwitcher } from './ThemeSwitcher';
 
 const input =
-  'w-full min-w-0 border border-line bg-card px-3 py-3 text-text outline-none focus:border-accent focus:shadow-[0_0_0_3px_color-mix(in_srgb,var(--accent)_20%,transparent)]';
+  'w-full min-w-0 border border-field-line bg-card px-3 py-3 text-text outline-none focus:border-accent focus:shadow-[0_0_0_3px_color-mix(in_srgb,var(--accent)_20%,transparent)]';
 const label = 'font-mono text-[11px] font-medium uppercase tracking-widest text-muted';
 
 export function SignIn() {
@@ -54,7 +54,7 @@ export function SignIn() {
               placeholder="your-company"
               className={`${input} rounded-l-[calc(var(--r)*0.75)]`}
             />
-            <span className="grid shrink-0 place-items-center rounded-r-[calc(var(--r)*0.75)] border border-l-0 border-line bg-card px-2.5 font-mono text-[11px] text-muted">
+            <span className="grid shrink-0 place-items-center rounded-r-[calc(var(--r)*0.75)] border border-l-0 border-field-line bg-card px-2.5 font-mono text-[11px] text-muted">
               .sitediary.app
             </span>
           </div>

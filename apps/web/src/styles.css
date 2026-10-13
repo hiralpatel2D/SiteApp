@@ -9,6 +9,7 @@
   --color-muted: var(--muted);
   --color-line: var(--line);
   --color-line-soft: var(--line-soft);
+  --color-field-line: var(--field-line);
   --color-accent: var(--accent);
   --color-on-accent: var(--on-accent);
   --color-good: var(--good);

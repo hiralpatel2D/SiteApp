@@ -3,7 +3,7 @@ import { useTheme } from '../theme/ThemeProvider';
 
 const group = 'flex flex-wrap gap-1.5';
 const btn =
-  'min-h-9 cursor-pointer whitespace-nowrap rounded-[calc(var(--r)/2)] border border-line px-3 font-mono text-[11px] font-medium uppercase tracking-widest text-muted aria-pressed:border-accent aria-pressed:bg-accent aria-pressed:text-on-accent';
+  'min-h-9 cursor-pointer whitespace-nowrap rounded-[calc(var(--r)/2)] border border-line px-3 font-mono text-[11px] font-medium uppercase tracking-widest text-muted aria-pressed:border-accent aria-pressed:bg-surface aria-pressed:text-text';
 
 export function ThemeSwitcher() {
   const { theme, modePref, setTheme, setModePref } = useTheme();
