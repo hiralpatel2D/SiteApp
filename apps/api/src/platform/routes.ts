@@ -63,7 +63,8 @@ export function platformRoutes(deps: PlatformRouteDeps): Hono<AppEnv> {
     const { name, slug, adminEmail } = parsed.data;
     const email = normaliseEmail(adminEmail);
 
-    // Company and Super Admin invitation commit together; the email goes out after.
+    // Company, Super Admin invitation and their audit rows commit together; the
+    // email goes out after.
     const created = await db.transaction(async (tx) => {
       const { companyId, roleIds } = await createCompany(tx, { name, slug }, { actorId: admin.id });
       const inv = await createInvitation(
@@ -77,6 +78,21 @@ export function platformRoutes(deps: PlatformRouteDeps): Hono<AppEnv> {
         },
         { appBaseUrl: deps.config.appBaseUrl },
       );
+      await tx.insert(auditLog).values({
+        id: newId(),
+        companyId,
+        userId: admin.id,
+        createdBy: admin.id,
+        action: 'invitation.created',
+        entity: 'invitation',
+        entityId: inv.invitationId,
+        after: {
+          email,
+          roleId: roleIds.super_admin,
+          projectIds: [],
+          expiresAt: inv.expiresAt.toISOString(),
+        },
+      });
       const [company] = await tx.select().from(companies).where(eq(companies.id, companyId));
       const [role] = await tx
         .select({ name: roles.name })

@@ -15,6 +15,7 @@ import { invitations, roles } from '../db/schema';
 import { withTenant } from '../db/tenant';
 import type { EmailSender } from '../email/email';
 import { AppError, validationError } from '../http/errors';
+import { rateLimit } from '../http/rate-limit';
 import { requireCap, runInTenant, tenantMiddleware, type TenantEnv } from '../tenant/context';
 import { claimInvitation, createInvitation, lookupOpenInvitation, notFound } from './service';
 
@@ -24,6 +25,10 @@ export type InvitationRouteDeps = {
   email: EmailSender;
   auth: Auth;
 };
+
+/** Spec §10: invite endpoints are rate-limited per client IP. */
+const PREVIEW_LIMIT = { max: 20, windowMs: 60_000 };
+const ACCEPT_LIMIT = { max: 5, windowMs: 60_000 };
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -76,7 +81,7 @@ function byTokenRoutes(deps: InvitationRouteDeps): Hono<AppEnv> {
   const { pools, auth } = deps;
   const r = new Hono<AppEnv>();
 
-  r.get('/:token', async (c) => {
+  r.get('/:token', rateLimit(PREVIEW_LIMIT), async (c) => {
     const inv = await lookupOpenInvitation(pools.app, c.req.param('token'));
     const { rows } = await pools.app.query<{ exists: boolean }>(
       'select exists (select 1 from users where email = $1) as exists',
@@ -91,7 +96,7 @@ function byTokenRoutes(deps: InvitationRouteDeps): Hono<AppEnv> {
     });
   });
 
-  r.post('/:token/accept', async (c) => {
+  r.post('/:token/accept', rateLimit(ACCEPT_LIMIT), async (c) => {
     const inv = await lookupOpenInvitation(pools.app, c.req.param('token'));
     const user = c.get('user');
     let userId: string;

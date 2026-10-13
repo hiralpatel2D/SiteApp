@@ -15,7 +15,7 @@ import {
   users,
 } from '../src/db/schema';
 import { cfg, ownerDb, useTestDb } from './helpers/db';
-import { cookieFrom, req, seedMember, seedUser, signIn, testApp } from './helpers/auth';
+import { cookieFrom, randomIp, req, seedMember, seedUser, signIn, testApp } from './helpers/auth';
 
 useTestDb();
 
@@ -555,5 +555,54 @@ describe('invitations: anti-escalation (R14)', () => {
     expect(r.status).toBe(403);
     const ok = await invite(ctx, { email: 'y@alpha.test', roleId: hr!.id }, hrUser.cookie);
     expect(ok.status).toBe(201);
+  });
+});
+
+describe('invitation by-token rate limits (spec §10)', () => {
+  const LIMITED = {
+    error: { code: 'rate_limited', message: 'Too many attempts. Wait a minute and try again.' },
+  };
+
+  it('preview: 20 per minute per client IP, then 429; other IPs unaffected', async () => {
+    const ctx = await setup();
+    const { token } = await inviteOk(ctx, { email: 'limit.preview@alpha.test' });
+    const ip = randomIp();
+    const statuses: number[] = [];
+    for (let i = 0; i < 21; i++) {
+      const r = await req(ctx.app, `/api/invitations/by-token/${token}`, { origin: null, ip });
+      statuses.push(r.status);
+      if (r.status === 429) expect(await r.json()).toEqual(LIMITED);
+    }
+    expect(statuses).toEqual([...Array<number>(20).fill(200), 429]);
+    const other = await req(ctx.app, `/api/invitations/by-token/${token}`, { origin: null });
+    expect(other.status).toBe(200);
+  });
+
+  it('accept: 5 per minute per client IP, then 429 before any work is done', async () => {
+    const ctx = await setup();
+    const ip = randomIp();
+    const statuses: number[] = [];
+    for (let i = 0; i < 6; i++) {
+      const r = await req(ctx.app, `/api/invitations/by-token/not-a-real-token-${i}/accept`, {
+        method: 'POST',
+        body: {},
+        ip,
+      });
+      statuses.push(r.status);
+      if (r.status === 429) expect(await r.json()).toEqual(LIMITED);
+    }
+    expect(statuses).toEqual([404, 404, 404, 404, 404, 429]);
+
+    // A real invitation from the same IP is still blocked; from another IP it works.
+    const { token } = await inviteOk(ctx, { email: 'limit.accept@alpha.test' });
+    const blocked = await req(ctx.app, `/api/invitations/by-token/${token}/accept`, {
+      body: { name: 'Limit', password: PASSWORD },
+      ip,
+    });
+    expect(blocked.status).toBe(429);
+    const ok = await req(ctx.app, `/api/invitations/by-token/${token}/accept`, {
+      body: { name: 'Limit', password: PASSWORD },
+    });
+    expect(ok.status).toBe(200);
   });
 });

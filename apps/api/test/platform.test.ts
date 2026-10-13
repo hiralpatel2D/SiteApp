@@ -80,8 +80,20 @@ describe('platform admin', () => {
       .select()
       .from(auditLog)
       .where(eq(auditLog.companyId, body.company.id));
-    expect(audit.map((a) => a.action)).toEqual(['company.created']);
-    expect(audit[0]!.userId).toBe(admin.id);
+    expect(audit.map((a) => a.action).sort()).toEqual(['company.created', 'invitation.created']);
+    expect(audit.every((a) => a.userId === admin.id)).toBe(true);
+    const [inv] = await ownerDb
+      .select()
+      .from(invitations)
+      .where(eq(invitations.companyId, body.company.id));
+    const invAudit = audit.find((a) => a.action === 'invitation.created')!;
+    expect(invAudit).toMatchObject({ entity: 'invitation', entityId: inv!.id });
+    expect(invAudit.after).toMatchObject({
+      email: 'boss@mehta.test',
+      roleId: inv!.roleId,
+      projectIds: [],
+      expiresAt: inv!.expiresAt.toISOString(),
+    });
 
     const token = body.inviteUrl.split('/invite/')[1]!;
     const acc = await req(app, `/api/invitations/by-token/${token}/accept`, {

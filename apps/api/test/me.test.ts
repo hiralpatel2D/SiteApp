@@ -1,8 +1,9 @@
 import { describe, it, expect } from 'vitest';
+import { eq } from 'drizzle-orm';
 import { createCompany } from '../src/companies/create-company';
-import { memberships } from '../src/db/schema';
+import { memberships, sessions } from '../src/db/schema';
 import { ownerDb, useTestDb } from './helpers/db';
-import { req, seedUser, signIn, testApp } from './helpers/auth';
+import { cookieFrom, req, seedUser, signIn, testApp } from './helpers/auth';
 
 useTestDb();
 
@@ -87,5 +88,57 @@ describe('GET /api/me', () => {
         status: 'active',
       },
     ]);
+  });
+});
+
+describe('session refresh (sliding expiry)', () => {
+  const DAY = 24 * 60 * 60 * 1000;
+
+  it('a near-expiry session is extended and the refreshed cookie reaches the browser', async () => {
+    const u = await seedUser({ email: 'refresh@x.test', password: PASSWORD, name: 'Ref' });
+    const { app } = testApp();
+    const cookie = await signIn(app, u.email, PASSWORD);
+    // Two days left of seven: past Better Auth's one-day update age.
+    await ownerDb
+      .update(sessions)
+      .set({ expiresAt: new Date(Date.now() + 2 * DAY) })
+      .where(eq(sessions.userId, u.id));
+
+    const r = await req(app, '/api/me', { cookie });
+    expect(r.status).toBe(200);
+    const refreshed = r.headers.getSetCookie().find((c) => c.includes('session_token='));
+    expect(refreshed).toBeDefined();
+    expect(refreshed).toMatch(/Max-Age=604800/);
+    expect(refreshed).toMatch(/HttpOnly/i);
+
+    const [s] = await ownerDb.select().from(sessions).where(eq(sessions.userId, u.id));
+    expect(s!.expiresAt.getTime()).toBeGreaterThan(Date.now() + 6 * DAY);
+
+    // The refreshed cookie keeps working.
+    const again = await req(app, '/api/me', { cookie: cookieFrom(r) });
+    expect(again.status).toBe(200);
+  });
+
+  it('a fresh session gets no Set-Cookie on ordinary API calls', async () => {
+    const u = await seedUser({ email: 'fresh@x.test', password: PASSWORD, name: 'Fresh' });
+    const { app } = testApp();
+    const cookie = await signIn(app, u.email, PASSWORD);
+    const r = await req(app, '/api/me', { cookie });
+    expect(r.status).toBe(200);
+    expect(r.headers.getSetCookie()).toEqual([]);
+  });
+
+  it('the refreshed cookie is kept on error responses too', async () => {
+    const u = await seedUser({ email: 'refresh.err@x.test', password: PASSWORD, name: 'Err' });
+    const { app } = testApp();
+    const cookie = await signIn(app, u.email, PASSWORD);
+    await ownerDb
+      .update(sessions)
+      .set({ expiresAt: new Date(Date.now() + 2 * DAY) })
+      .where(eq(sessions.userId, u.id));
+    // No company header: 400 company_required, still with the refreshed cookie.
+    const r = await req(app, '/api/company/context', { cookie });
+    expect(r.status).toBe(400);
+    expect(r.headers.getSetCookie().some((c) => c.includes('session_token='))).toBe(true);
   });
 });

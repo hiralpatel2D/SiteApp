@@ -97,8 +97,8 @@ export function createAuth(deps: AuthDeps) {
       disableOriginCheck: false,
       disableCSRFCheck: false,
       database: { generateId: () => newId() },
-      // Set by apps/web/server.mjs from the right-most x-forwarded-for entry
-      // (appended by the platform edge); the left-most entry is client-controlled.
+      // Set by apps/web/server.mjs (never taken from the browser): Railway's
+      // X-Real-IP, else the right-most x-forwarded-for entry, else the socket peer.
       ipAddress: { ipAddressHeaders: ['x-client-ip'] },
     },
     hooks: {
