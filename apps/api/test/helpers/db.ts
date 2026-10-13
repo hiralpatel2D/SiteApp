@@ -12,8 +12,10 @@ import { companies, projects } from '../../src/db/schema';
 const envFile = fileURLToPath(new URL('../../.env.test', import.meta.url));
 if (existsSync(envFile)) process.loadEnvFile(envFile);
 
-const cfg = loadConfig({ ...process.env, NODE_ENV: 'test' });
-const pools = createPools(cfg);
+/** Config for tests (NODE_ENV forced to `test`). */
+export const cfg = loadConfig({ ...process.env, NODE_ENV: 'test' });
+/** All pools; tests hand these to `createApp`. */
+export const pools = createPools(cfg);
 
 /** Owner (BYPASSRLS) pool: seeding and cleanup only. */
 export const owner = pools.owner;

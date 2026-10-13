@@ -65,7 +65,9 @@ export function createWebServer({ distDir, apiUrl }) {
     const target = `${upstream}${incoming.pathname}${incoming.search}`;
     const headers = new Headers();
     for (const [k, v] of c.req.raw.headers) {
-      if (!HOP_BY_HOP.has(k.toLowerCase())) headers.set(k, v);
+      const key = k.toLowerCase();
+      // x-client-ip is ours to set: never trust a client-sent value.
+      if (!HOP_BY_HOP.has(key) && key !== 'x-client-ip') headers.set(k, v);
     }
     // No socket info when called via app.request() (tests); fall back to the prior header only.
     let clientAddr;
@@ -77,6 +79,17 @@ export function createWebServer({ distDir, apiUrl }) {
     const priorFor = c.req.header('x-forwarded-for');
     const forwardedFor = [priorFor, clientAddr].filter(Boolean).join(', ');
     if (forwardedFor) headers.set('x-forwarded-for', forwardedFor);
+    // The client IP the API trusts (auth rate limiting, session records). The
+    // platform edge (Railway) appends the real client address as the RIGHT-most
+    // x-forwarded-for entry; anything to its left is client-controlled. Without
+    // forwarding information, use the socket peer.
+    const clientIp =
+      priorFor
+        ?.split(',')
+        .map((p) => p.trim())
+        .filter(Boolean)
+        .at(-1) ?? clientAddr;
+    if (clientIp) headers.set('x-client-ip', clientIp);
     const proto =
       c.req.header('x-forwarded-proto')?.split(',')[0]?.trim().toLowerCase() === 'https'
         ? 'https'

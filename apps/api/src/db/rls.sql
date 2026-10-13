@@ -139,4 +139,23 @@ $fn$;
 REVOKE ALL ON FUNCTION app_invitation_lookup(text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION app_invitation_lookup(text) TO app_user;
 
+-- Whether an open (not accepted, not revoked, not expired) invitation exists
+-- for an email, in any company. Gates the invite-only sign-up; returns only a
+-- boolean. Emails are stored lowercase (CHECK), so the argument is normalised.
+CREATE OR REPLACE FUNCTION app_open_invitation_exists(p_email text)
+RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, public
+AS $fn$
+  SELECT EXISTS (
+    SELECT 1
+      FROM public.invitations i
+     WHERE i.email = lower(btrim(p_email))
+       AND i.accepted_at IS NULL
+       AND i.revoked_at IS NULL
+       AND i.expires_at > now()
+  )
+$fn$;
+REVOKE ALL ON FUNCTION app_open_invitation_exists(text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION app_open_invitation_exists(text) TO app_user;
+
 -- The owner role (migrations, platform admin) is exempt via superuser/BYPASSRLS.

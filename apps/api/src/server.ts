@@ -3,6 +3,7 @@ import { serve } from '@hono/node-server';
 import { loadConfig } from './config';
 import { createApp } from './app';
 import { createPools } from './db/pools';
+import { consoleEmailSender } from './email/email';
 
 let config;
 try {
@@ -24,7 +25,7 @@ const checkDb = async (): Promise<boolean> => {
   }
 };
 
-const app = createApp({ checkDb });
+const app = createApp({ checkDb, pools, config, email: consoleEmailSender });
 const server = serve({ fetch: app.fetch, port: config.port }, (info) => {
   console.log(`API listening on port ${info.port}`);
 }) as Server;

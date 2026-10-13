@@ -62,6 +62,9 @@ start() {
   echo "MIGRATION_DATABASE_URL=postgres://$SUPERUSER:$SUPERUSER_PASSWORD@127.0.0.1:$PORT/$DB_NAME"
   echo "DATABASE_URL=postgres://app_user:$APP_PASSWORD@127.0.0.1:$PORT/$DB_NAME"
   echo "APP_DB_PASSWORD=$APP_PASSWORD"
+  echo "BETTER_AUTH_SECRET=test-only-better-auth-secret-0123456789abcdef"
+  echo "APP_BASE_URL=http://localhost:5173"
+  echo "PLATFORM_ADMIN_EMAILS=owner@sitediary.test"
 }
 
 stop() {
