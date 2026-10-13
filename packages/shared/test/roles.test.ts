@@ -17,4 +17,11 @@ describe('roles', () => {
     SYSTEM_ROLES.forEach((r) =>
       defaultCapabilities(r.key).forEach((c) => expect(CAPABILITIES).toContain(c)),
     ));
+  it('projects.all only for super_admin and admin', () => {
+    for (const r of SYSTEM_ROLES) {
+      expect(defaultCapabilities(r.key).includes('projects.all')).toBe(
+        r.key === 'super_admin' || r.key === 'admin',
+      );
+    }
+  });
 });

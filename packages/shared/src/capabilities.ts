@@ -23,6 +23,7 @@ export const CORE_CAPABILITIES = [
   'roles.manage',
   'projects.view',
   'projects.manage',
+  'projects.all',
   'audit.view',
 ] as const;
 export type CoreCapability = (typeof CORE_CAPABILITIES)[number];

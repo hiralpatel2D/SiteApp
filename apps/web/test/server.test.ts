@@ -37,6 +37,7 @@ beforeAll(async () => {
       host: c.req.header('host'),
     }),
   );
+  api.get('/api/headers', (c) => c.json(Object.fromEntries(c.req.raw.headers)));
   api.get('/api/teapot', (c) => c.json({ error: 'nope' }, 418));
   fakeApi = await new Promise<Server>((resolve) => {
     const s = serve({ fetch: api.fetch, port: 0, hostname: '127.0.0.1' }, () =>
@@ -114,6 +115,39 @@ describe('web server', () => {
     expect(j.body).toEqual({ hello: 'world' });
     expect(j.custom).toBe('yes');
     expect(j.host).not.toBe('public.example');
+  });
+
+  it('sets forwarding headers and identity encoding upstream', async () => {
+    const r = await web.request('/api/headers', {
+      headers: { 'accept-encoding': 'gzip', 'x-forwarded-for': '203.0.113.9' },
+    });
+    const h = (await r.json()) as Record<string, string>;
+    expect(h['x-forwarded-for']).toBeTruthy();
+    expect(h['x-forwarded-for']).toContain('203.0.113.9');
+    expect(h['accept-encoding']).toBe('identity');
+    expect(h['x-forwarded-proto']).toBe('http');
+  });
+
+  it('appends the client socket address on a real connection', async () => {
+    const real = await new Promise<Server>((resolve) => {
+      const s = serve({ fetch: web.fetch, port: 0, hostname: '127.0.0.1' }, () =>
+        resolve(s as Server),
+      );
+    });
+    try {
+      const port = (real.address() as AddressInfo).port;
+      const r = await fetch(`http://127.0.0.1:${port}/api/headers`);
+      const h = (await r.json()) as Record<string, string>;
+      expect(h['x-forwarded-for']).toMatch(/127\.0\.0\.1$/);
+    } finally {
+      await new Promise((res) => real.close(res));
+    }
+  });
+
+  it('keeps an incoming https x-forwarded-proto', async () => {
+    const r = await web.request('/api/headers', { headers: { 'x-forwarded-proto': 'https' } });
+    const h = (await r.json()) as Record<string, string>;
+    expect(h['x-forwarded-proto']).toBe('https');
   });
 
   it('returns upstream status codes', async () => {

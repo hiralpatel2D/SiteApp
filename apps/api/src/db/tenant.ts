@@ -1,8 +1,9 @@
 import type pg from 'pg';
-import { DrizzleQueryError, sql } from 'drizzle-orm';
+import { sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import * as schema from './schema';
 import type { Db } from './pools';
+import { unwrapDbError } from './errors';
 
 /** Drizzle transaction handle scoped to one tenant by `withTenant`. */
 export type AppTx = Parameters<Parameters<Db['transaction']>[0]>[0];
@@ -45,7 +46,6 @@ export async function withTenant<T>(
     // connection (possibly still inside the tenant's transaction) to another
     // request: destroy it instead of returning it to the pool.
     client.release(err instanceof Error ? err : true);
-    if (err instanceof DrizzleQueryError && err.cause instanceof Error) throw err.cause;
-    throw err;
+    throw unwrapDbError(err);
   }
 }

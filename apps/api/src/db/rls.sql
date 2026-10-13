@@ -14,7 +14,13 @@ END $$;
 ALTER ROLE app_user LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION;
 
 GRANT USAGE ON SCHEMA public TO app_user;
-GRANT SELECT, INSERT, UPDATE, DELETE ON projects, roles, role_capabilities, audit_log TO app_user;
+GRANT SELECT, INSERT, UPDATE, DELETE ON projects, roles, role_capabilities TO app_user;
+-- audit_log is append-only for the app role. Revoke first so older databases,
+-- which were granted UPDATE/DELETE before, are tightened on re-run.
+REVOKE UPDATE, DELETE ON audit_log FROM app_user;
+GRANT SELECT, INSERT ON audit_log TO app_user;
+-- No role may create objects in the public schema by default.
+REVOKE CREATE ON SCHEMA public FROM PUBLIC;
 GRANT SELECT ON companies TO app_user;
 
 -- companies: app_user may read only its own company row (no write grants).

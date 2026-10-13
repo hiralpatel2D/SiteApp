@@ -1,4 +1,3 @@
-import { DrizzleQueryError } from 'drizzle-orm';
 import {
   SYSTEM_ROLES,
   defaultCapabilities,
@@ -8,19 +7,13 @@ import {
 } from '@sitediary/shared';
 import type { Db } from '../db/pools';
 import { auditLog, companies, roleCapabilities, roles } from '../db/schema';
+import { isUniqueViolation } from '../db/errors';
 import { AppError } from '../http/errors';
 
 export type CreateCompanyInput = { name: string; slug: string };
 export type CreateCompanyResult = { companyId: string; roleIds: Record<SystemRoleKey, string> };
 
 const SLUG_UNIQUE = 'companies_slug_unique';
-
-function isSlugTaken(err: unknown): boolean {
-  const cause = err instanceof DrizzleQueryError ? err.cause : err;
-  if (typeof cause !== 'object' || cause === null) return false;
-  const e = cause as { code?: unknown; constraint?: unknown };
-  return e.code === '23505' && e.constraint === SLUG_UNIQUE;
-}
 
 /**
  * Creates a company with its nine system roles, their default capabilities and
@@ -76,7 +69,7 @@ export async function createCompany(
       });
     });
   } catch (err) {
-    if (isSlugTaken(err)) {
+    if (isUniqueViolation(err, SLUG_UNIQUE)) {
       throw new AppError(409, 'slug_taken', 'That workspace name is already in use.');
     }
     throw err;
