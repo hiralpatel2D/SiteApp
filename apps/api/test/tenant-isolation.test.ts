@@ -59,6 +59,9 @@ describe('tenant isolation (RLS)', () => {
       order by 1`);
     expect(rows.map((r) => r.table)).toEqual([
       'audit_log',
+      'invitations',
+      'memberships',
+      'project_assignments',
       'projects',
       'role_capabilities',
       'roles',
