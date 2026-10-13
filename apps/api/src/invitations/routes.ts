@@ -186,6 +186,7 @@ function tenantRoutes(deps: InvitationRouteDeps): Hono<AppEnv> {
           roleId: body.roleId,
           projectIds: body.projectIds,
           invitedBy: t.userId,
+          actor: t,
         },
         { appBaseUrl: deps.config.appBaseUrl },
       );

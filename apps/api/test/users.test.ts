@@ -2,9 +2,16 @@ import { describe, it, expect } from 'vitest';
 import { and, eq, inArray } from 'drizzle-orm';
 import { newId } from '@sitediary/shared';
 import { createCompany } from '../src/companies/create-company';
-import { auditLog, memberships, projectAssignments, projects } from '../src/db/schema';
+import {
+  auditLog,
+  memberships,
+  projectAssignments,
+  projects,
+  roleCapabilities,
+  roles,
+} from '../src/db/schema';
 import { owner, ownerDb, useTestDb } from './helpers/db';
-import { req, seedMember, testApp } from './helpers/auth';
+import { req, seedMember, signIn, testApp } from './helpers/auth';
 
 useTestDb();
 
@@ -72,6 +79,50 @@ const auditRows = (companyId: string, entityId: string) =>
     .from(auditLog)
     .where(and(eq(auditLog.companyId, companyId), eq(auditLog.entityId, entityId)))
     .orderBy(auditLog.action);
+
+const activeSuperAdmins = async (companyId: string) => {
+  const { rows } = await owner.query<{ n: number }>(
+    `select count(*)::int as n from memberships m join roles r on r.id = m.role_id
+      where m.company_id = $1 and m.status = 'active' and r.key = 'super_admin'`,
+    [companyId],
+  );
+  return rows[0]!.n;
+};
+
+/**
+ * Runs two requests so their transactions really overlap: a SHARE lock on
+ * audit_log (held by a separate connection) stops each one at its audit
+ * insert, i.e. after its membership write and before the lockout guard, or
+ * earlier on a row lock the other holds. Released once both backends wait.
+ */
+async function race(
+  first: () => Promise<Response>,
+  second: () => Promise<Response>,
+): Promise<[Response, Response]> {
+  const gate = await owner.connect();
+  try {
+    await gate.query('begin');
+    await gate.query('lock table audit_log in share mode');
+    const { rows: me } = await gate.query<{ pid: number }>('select pg_backend_pid() as pid');
+    const pa = first();
+    const pb = second();
+    const deadline = Date.now() + 10_000;
+    for (;;) {
+      const { rows } = await owner.query<{ n: number }>(
+        `select count(distinct pid)::int as n from pg_locks
+          where not granted and pid <> $1`,
+        [me[0]!.pid],
+      );
+      if (rows[0]!.n >= 2) break;
+      if (Date.now() > deadline) throw new Error('requests never both blocked');
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    await gate.query('commit');
+    return await Promise.all([pa, pb]);
+  } finally {
+    gate.release();
+  }
+}
 
 describe('GET /api/users', () => {
   it('lists the company’s members ordered by name, without other companies', async () => {
@@ -164,15 +215,12 @@ describe('PATCH /api/users/:membershipId', () => {
     expect(r.status).toBe(200);
     const body = (await r.json()) as UserRow;
     expect(body).toMatchObject({ status: 'deactivated', version: 2 });
-    // ...and now the second one is the last.
-    const second2 = await seedMember(ctx.co.companyId, 'admin', 'admin@alpha.test', {
-      app: ctx.app,
-    });
+    // ...and now the second one is the last: they cannot deactivate themselves.
     const r2 = await patch(
       ctx,
       second.membershipId,
       { version: 1, status: 'deactivated' },
-      second2.cookie,
+      await signIn(ctx.app, second.email, second.password),
     );
     expect(r2.status).toBe(409);
     expect((await errorOf(r2)).code).toBe('last_super_admin');
@@ -183,7 +231,6 @@ describe('PATCH /api/users/:membershipId', () => {
     const second = await seedMember(ctx.co.companyId, 'super_admin', 'second@alpha.test', {
       signIn: false,
     });
-    const admin = await seedMember(ctx.co.companyId, 'admin', 'admin@alpha.test', { app: ctx.app });
     for (let round = 0; round < 3; round++) {
       // Reset both to active super admins between rounds.
       await ownerDb
@@ -191,53 +238,33 @@ describe('PATCH /api/users/:membershipId', () => {
         .set({ status: 'active', roleId: ctx.co.roleIds.super_admin, version: 1 })
         .where(inArray(memberships.id, [ctx.owner.membershipId, second.membershipId]));
 
-      // Force a real overlap: hold a SHARE lock on audit_log so both PATCHes
-      // update their membership and then block on their audit insert (after
-      // the change, before the lockout guard). Release once both wait.
-      const gate = await owner.connect();
-      let a: Response;
-      let b: Response;
-      try {
-        await gate.query('begin');
-        await gate.query('lock table audit_log in share mode');
-        const pa = patch(
-          ctx,
-          ctx.owner.membershipId,
-          { version: 1, status: 'deactivated' },
-          admin.cookie,
-        );
-        const pb = patch(
-          ctx,
-          second.membershipId,
-          { version: 1, roleId: ctx.co.roleIds.admin },
-          admin.cookie,
-        );
-        const deadline = Date.now() + 10_000;
-        for (;;) {
-          const { rows } = await owner.query<{ n: number }>(
-            `select count(*)::int as n from pg_locks
-              where not granted and relation = 'audit_log'::regclass`,
-          );
-          if (rows[0]!.n >= 2) break;
-          if (Date.now() > deadline) throw new Error('PATCHes never blocked on audit_log');
-          await new Promise((r) => setTimeout(r, 10));
-        }
-        await gate.query('commit');
-        [a, b] = await Promise.all([pa, pb]);
-      } finally {
-        gate.release();
-      }
-
+      const [a, b] = await race(
+        () => patch(ctx, ctx.owner.membershipId, { version: 1, status: 'deactivated' }),
+        () => patch(ctx, second.membershipId, { version: 1, roleId: ctx.co.roleIds.admin }),
+      );
       const statuses = [a.status, b.status].sort();
       expect(statuses).toEqual([200, 409]);
       const loser = a.status === 409 ? a : b;
       expect((await errorOf(loser)).code).toBe('last_super_admin');
-      const { rows } = await owner.query<{ n: number }>(
-        `select count(*)::int as n from memberships m join roles r on r.id = m.role_id
-          where m.company_id = $1 and m.status = 'active' and r.key = 'super_admin'`,
-        [ctx.co.companyId],
+      expect(await activeSuperAdmins(ctx.co.companyId)).toBe(1);
+    }
+  });
+
+  it('two concurrent promotions to super admin both succeed (no deadlock)', async () => {
+    const ctx = await setup();
+    const x = await seedMember(ctx.co.companyId, 'admin', 'x@alpha.test', { signIn: false });
+    const y = await seedMember(ctx.co.companyId, 'admin', 'y@alpha.test', { signIn: false });
+    for (let round = 0; round < 3; round++) {
+      await ownerDb
+        .update(memberships)
+        .set({ roleId: ctx.co.roleIds.admin, version: 1 })
+        .where(inArray(memberships.id, [x.membershipId, y.membershipId]));
+      const [a, b] = await race(
+        () => patch(ctx, x.membershipId, { version: 1, roleId: ctx.co.roleIds.super_admin }),
+        () => patch(ctx, y.membershipId, { version: 1, roleId: ctx.co.roleIds.super_admin }),
       );
-      expect(rows[0]!.n).toBe(1);
+      expect([a.status, b.status]).toEqual([200, 200]);
+      expect(await activeSuperAdmins(ctx.co.companyId)).toBe(3);
     }
   });
 
@@ -399,5 +426,108 @@ describe('PATCH /api/users/:membershipId', () => {
     });
     expect(after.status).toBe(403);
     expect((await errorOf(after)).code).toBe('not_a_member');
+  });
+});
+
+describe('PATCH /api/users: only a Super Admin manages Super Admins (R14)', () => {
+  it('an Admin cannot promote themselves, demote or deactivate a Super Admin → 403', async () => {
+    const ctx = await setup();
+    const admin = await seedMember(ctx.co.companyId, 'admin', 'admin@alpha.test', {
+      app: ctx.app,
+    });
+    const forbiddenBody = {
+      code: 'forbidden',
+      message: 'You do not have permission to do this.',
+    };
+    const promote = await patch(
+      ctx,
+      admin.membershipId,
+      { version: 1, roleId: ctx.co.roleIds.super_admin },
+      admin.cookie,
+    );
+    expect(promote.status).toBe(403);
+    expect(await errorOf(promote)).toEqual(forbiddenBody);
+    // Even with a second Super Admin (so the lockout guard would pass).
+    await seedMember(ctx.co.companyId, 'super_admin', 'second@alpha.test', { signIn: false });
+    const deactivate = await patch(
+      ctx,
+      ctx.owner.membershipId,
+      { version: 1, status: 'deactivated' },
+      admin.cookie,
+    );
+    expect(deactivate.status).toBe(403);
+    const demote = await patch(
+      ctx,
+      ctx.owner.membershipId,
+      { version: 1, roleId: ctx.co.roleIds.admin },
+      admin.cookie,
+    );
+    expect(demote.status).toBe(403);
+    // Project assignments of a Super Admin are not Super Admin management.
+    const projectsOnly = await patch(
+      ctx,
+      ctx.owner.membershipId,
+      { version: 1, projectIds: [ctx.p1] },
+      admin.cookie,
+    );
+    expect(projectsOnly.status).toBe(200);
+    const u = await userOf(ctx, ctx.owner.membershipId);
+    expect(u).toMatchObject({ roleId: ctx.co.roleIds.super_admin, status: 'active' });
+    expect((await userOf(ctx, admin.membershipId)).roleId).toBe(ctx.co.roleIds.admin);
+    // The Admin still manages everyone else.
+    expect(
+      (await patch(ctx, ctx.eng.membershipId, { version: 1, status: 'deactivated' }, admin.cookie))
+        .status,
+    ).toBe(200);
+  });
+
+  it('a Super Admin can promote and demote Super Admins', async () => {
+    const ctx = await setup();
+    const promote = await patch(ctx, ctx.eng.membershipId, {
+      version: 1,
+      roleId: ctx.co.roleIds.super_admin,
+    });
+    expect(promote.status).toBe(200);
+    const demote = await patch(ctx, ctx.eng.membershipId, {
+      version: 2,
+      roleId: ctx.co.roleIds.supervisor,
+    });
+    expect(demote.status).toBe(200);
+  });
+
+  it('nobody assigns a role with a capability they lack → 403', async () => {
+    const ctx = await setup();
+    const hr = await ownerDb
+      .insert(roles)
+      .values({ companyId: ctx.co.companyId, name: 'HR', isSystem: false })
+      .returning({ id: roles.id });
+    const hrRoleId = hr[0]!.id;
+    await ownerDb.insert(roleCapabilities).values(
+      ['company.view', 'users.view', 'users.manage'].map((capability) => ({
+        companyId: ctx.co.companyId,
+        roleId: hrRoleId,
+        capability,
+      })),
+    );
+    const hrUser = await seedMember(ctx.co.companyId, hrRoleId, 'hr@alpha.test', { app: ctx.app });
+    // Promoting themselves (or anyone) to Admin would grant capabilities HR lacks.
+    for (const target of [hrUser.membershipId, ctx.eng.membershipId]) {
+      const r = await patch(
+        ctx,
+        target,
+        { version: 1, roleId: ctx.co.roleIds.admin },
+        hrUser.cookie,
+      );
+      expect(r.status).toBe(403);
+      expect((await errorOf(r)).code).toBe('forbidden');
+    }
+    // A role within their own capabilities is fine.
+    const ok = await patch(
+      ctx,
+      ctx.eng.membershipId,
+      { version: 1, roleId: hrRoleId },
+      hrUser.cookie,
+    );
+    expect(ok.status).toBe(200);
   });
 });

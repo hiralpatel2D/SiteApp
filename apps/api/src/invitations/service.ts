@@ -5,9 +5,12 @@ import { newId } from '@sitediary/shared';
 import { normaliseEmail } from '../auth/auth';
 import { isUniqueViolation } from '../db/errors';
 import type { Db } from '../db/pools';
-import { invitations, memberships, projectAssignments, projects, roles, users } from '../db/schema';
+import { invitations, memberships, projectAssignments, projects, users } from '../db/schema';
 import type { AppTx } from '../db/tenant';
 import { AppError } from '../http/errors';
+import { assertCanGrant, forbidden, isSuperAdmin, readAssignableRole } from '../roles/authz';
+import { SUPER_ADMIN_KEY } from '../roles/lockout';
+import type { Tenant } from '../tenant/context';
 
 /** Invitations expire 7 days after creation (Global Constraints, Fixed values). */
 export const INVITATION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -60,6 +63,13 @@ export type CreateInvitationInput = {
   roleId: string;
   projectIds: string[];
   invitedBy: string | null;
+  /**
+   * The inviting company member. When given, the R14 rules apply: only a
+   * Super Admin may invite as Super Admin, and the role may not carry a
+   * capability the inviter lacks (403 `forbidden`). The platform-admin
+   * bootstrap invitation passes none.
+   */
+  actor?: Tenant;
 };
 
 /**
@@ -75,11 +85,13 @@ export async function createInvitation(
   const email = normaliseEmail(input.email);
   const { companyId } = input;
 
-  const [role] = await tx
-    .select({ id: roles.id })
-    .from(roles)
-    .where(and(eq(roles.companyId, companyId), eq(roles.id, input.roleId)));
+  // FOR KEY SHARE: a concurrent role delete waits for us, or wins and we 404.
+  const role = await readAssignableRole(tx, companyId, input.roleId);
   if (!role) throw notFound();
+  if (input.actor) {
+    if (role.key === SUPER_ADMIN_KEY && !isSuperAdmin(input.actor)) throw forbidden();
+    assertCanGrant(input.actor, role.capabilities);
+  }
 
   const projectIds = [...new Set(input.projectIds)];
   const valid = await companyProjectIds(tx, companyId, projectIds);

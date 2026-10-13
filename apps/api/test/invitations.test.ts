@@ -10,6 +10,8 @@ import {
   memberships,
   projectAssignments,
   projects,
+  roleCapabilities,
+  roles,
   users,
 } from '../src/db/schema';
 import { cfg, ownerDb, useTestDb } from './helpers/db';
@@ -513,5 +515,45 @@ describe('invitations', () => {
     await seedUser({ email: 'free@else.test', password: PASSWORD, name: 'F' });
     const r = await invite(ctx, { email: 'free@else.test' });
     expect(r.status).toBe(201);
+  });
+});
+
+describe('invitations: anti-escalation (R14)', () => {
+  it('only a Super Admin may invite as Super Admin; Admin → 403', async () => {
+    const ctx = await setup();
+    const r = await invite(ctx, { email: 'boss@alpha.test', roleId: ctx.co.roleIds.super_admin });
+    expect(r.status).toBe(403);
+    expect((await errorOf(r)).code).toBe('forbidden');
+    const sa = await seedMember(ctx.co.companyId, 'super_admin', 'sa@alpha.test', { app: ctx.app });
+    const ok = await invite(
+      ctx,
+      { email: 'boss@alpha.test', roleId: ctx.co.roleIds.super_admin },
+      sa.cookie,
+    );
+    expect(ok.status).toBe(201);
+  });
+
+  it('nobody invites to a role with a capability they lack → 403', async () => {
+    const ctx = await setup();
+    const [hr] = await ownerDb
+      .insert(roles)
+      .values({ companyId: ctx.co.companyId, name: 'HR', isSystem: false })
+      .returning({ id: roles.id });
+    await ownerDb.insert(roleCapabilities).values(
+      ['company.view', 'users.view', 'users.manage'].map((capability) => ({
+        companyId: ctx.co.companyId,
+        roleId: hr!.id,
+        capability,
+      })),
+    );
+    const hrUser = await seedMember(ctx.co.companyId, hr!.id, 'hr@alpha.test', { app: ctx.app });
+    const r = await invite(
+      ctx,
+      { email: 'x@alpha.test', roleId: ctx.co.roleIds.admin },
+      hrUser.cookie,
+    );
+    expect(r.status).toBe(403);
+    const ok = await invite(ctx, { email: 'y@alpha.test', roleId: hr!.id }, hrUser.cookie);
+    expect(ok.status).toBe(201);
   });
 });

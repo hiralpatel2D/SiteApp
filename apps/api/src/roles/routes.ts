@@ -16,10 +16,11 @@ import type { AppTx } from '../db/tenant';
 import { parseBody } from '../http/body';
 import { AppError } from '../http/errors';
 import { requireCap, runInTenant, tenantMiddleware, type TenantEnv } from '../tenant/context';
+import { assertCanGrant, forbidden, isSuperAdmin } from './authz';
 import { SUPER_ADMIN_KEY, assertSuperAdminRemains, systemRoleLocked } from './lockout';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const NAME_UNIQUE = 'roles_company_id_name_unique';
+const NAME_UNIQUE = 'roles_company_id_lower_name_unique';
 /** Capabilities the Super Admin role can never lose (spec §6.3). */
 const LOCKED_CAPABILITIES: readonly Capability[] = ['users.manage', 'roles.manage'];
 
@@ -148,6 +149,8 @@ function roleIdParam(raw: string): string {
  * `/api/roles`: system and custom roles and the permission matrix (each
  * role's capability set). Capabilities are read fresh on every request by
  * `tenantMiddleware`, so edits apply to the role's members on their next request.
+ * Only a Super Admin may edit the Super Admin role, and nobody may add a
+ * capability they do not hold (403 `forbidden`, R14).
  */
 export function roleRoutes(pools: Pools): Hono<AppEnv> {
   const r = new Hono<TenantEnv>();
@@ -162,6 +165,8 @@ export function roleRoutes(pools: Pools): Hono<AppEnv> {
     const body = await parseBody(c, createRoleBodySchema);
     const t = c.get('tenant');
     const capabilities = [...body.capabilities].sort();
+    // Nobody grants a capability they do not hold (R14).
+    assertCanGrant(t, capabilities);
     try {
       const created = await runInTenant(c, async (tx) => {
         const id = newId();
@@ -196,7 +201,10 @@ export function roleRoutes(pools: Pools): Hono<AppEnv> {
     const t = c.get('tenant');
     try {
       const updated = await runInTenant(c, async (tx) => {
+        // For the Super Admin role this FOR UPDATE is also the lockout guard's
+        // lock, taken before any write (see lockSuperAdminRole).
         const role = await lockRole(tx, t.companyId, id);
+        if (role.key === SUPER_ADMIN_KEY && !isSuperAdmin(t)) throw forbidden();
         if (role.version !== body.version) throw staleVersion();
 
         const before = await capabilitiesOf(tx, t.companyId, id);
@@ -209,6 +217,12 @@ export function roleRoutes(pools: Pools): Hono<AppEnv> {
             throw systemRoleLocked();
           }
         }
+
+        // Removing a capability is allowed; adding one requires holding it.
+        assertCanGrant(
+          t,
+          nextCaps.filter((cap) => !before.includes(cap)),
+        );
 
         const nameChanged = nextName !== role.name;
         const capsChanged =
@@ -240,7 +254,7 @@ export function roleRoutes(pools: Pools): Hono<AppEnv> {
           before: { name: role.name, capabilities: before },
           after: { name: nextName, capabilities: nextCaps },
         });
-        await assertSuperAdminRemains(tx, t.companyId);
+        if (role.key === SUPER_ADMIN_KEY) await assertSuperAdminRemains(tx, t.companyId);
         return (await selectRoles(tx, t.companyId, id))[0]!;
       });
       return c.json(updated);
@@ -255,6 +269,9 @@ export function roleRoutes(pools: Pools): Hono<AppEnv> {
     const t = c.get('tenant');
     await runInTenant(c, async (tx) => {
       const role = await lockRole(tx, t.companyId, id);
+      // Authorisation first: a non-Super Admin gets 403 for the Super Admin
+      // role; a Super Admin gets 409 system_role like any built-in role.
+      if (role.key === SUPER_ADMIN_KEY && !isSuperAdmin(t)) throw forbidden();
       if (role.isSystem) {
         throw new AppError(409, 'system_role', 'Built-in roles cannot be deleted.');
       }

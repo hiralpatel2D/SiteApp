@@ -76,7 +76,9 @@ export const roles = pgTable(
     isSystem: boolean('is_system').notNull().default(false),
   },
   (t) => [
-    unique('roles_company_id_name_unique').on(t.companyId, t.name),
+    // Role names are unique per company ignoring case ("Safety Officer" vs
+    // "safety officer"); replaces the exact-match roles_company_id_name_unique.
+    uniqueIndex('roles_company_id_lower_name_unique').on(t.companyId, sql`lower(${t.name})`),
     // Target for the composite FK below, so a capability can only point at a
     // role of the same company.
     unique('roles_company_id_id_unique').on(t.companyId, t.id),

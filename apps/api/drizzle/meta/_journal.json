@@ -15,6 +15,13 @@
       "when": 1791900049346,
       "tag": "0001_identity",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1791910882081,
+      "tag": "0002_roles_name_case_insensitive",
+      "breakpoints": true
     }
   ]
 }

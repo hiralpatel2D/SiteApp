@@ -392,3 +392,103 @@ describe('roles and the permission matrix', () => {
     expect((await errorOf(r)).code).toBe('forbidden');
   });
 });
+
+describe('roles: anti-escalation (R14)', () => {
+  it('an Admin cannot edit or delete the Super Admin role → 403; Super Admin delete → 409', async () => {
+    const ctx = await setup();
+    const admin = await seedMember(ctx.co.companyId, 'admin', 'admin@alpha.test', {
+      app: ctx.app,
+    });
+    const sa = ctx.co.roleIds.super_admin;
+    const strip = await call(
+      ctx,
+      'PATCH',
+      `/api/roles/${sa}`,
+      { version: 1, capabilities: ['company.view', 'users.manage', 'roles.manage'] },
+      admin.cookie,
+    );
+    expect(strip.status).toBe(403);
+    expect(await errorOf(strip)).toEqual({
+      code: 'forbidden',
+      message: 'You do not have permission to do this.',
+    });
+    const del = await call(ctx, 'DELETE', `/api/roles/${sa}`, undefined, admin.cookie);
+    expect(del.status).toBe(403);
+    expect([...(await listRoles(ctx))[0]!.capabilities].sort()).toEqual([...CAPABILITIES].sort());
+    // The Super Admin gets the built-in-role answer.
+    const own = await call(ctx, 'DELETE', `/api/roles/${sa}`);
+    expect(own.status).toBe(409);
+    expect((await errorOf(own)).code).toBe('system_role');
+    // The Admin can still edit other system roles.
+    const ok = await call(
+      ctx,
+      'PATCH',
+      `/api/roles/${ctx.co.roleIds.client}`,
+      { version: 1, capabilities: ['company.view'] },
+      admin.cookie,
+    );
+    expect(ok.status).toBe(200);
+  });
+
+  it('a custom role with roles.manage cannot grant itself (or a new role) users.manage', async () => {
+    const ctx = await setup();
+    const role = await createRole(ctx, 'Role Clerk', [
+      'company.view',
+      'roles.view',
+      'roles.manage',
+    ]);
+    const clerk = await seedMember(ctx.co.companyId, role.id, 'clerk@alpha.test', { app: ctx.app });
+    const self = await call(
+      ctx,
+      'PATCH',
+      `/api/roles/${role.id}`,
+      { version: 1, capabilities: [...role.capabilities, 'users.manage'] },
+      clerk.cookie,
+    );
+    expect(self.status).toBe(403);
+    expect((await errorOf(self)).code).toBe('forbidden');
+    const create = await call(
+      ctx,
+      'POST',
+      '/api/roles',
+      { name: 'Backdoor', capabilities: ['company.view', 'users.manage'] },
+      clerk.cookie,
+    );
+    expect(create.status).toBe(403);
+    // Within their own capabilities: allowed, and removing is always allowed.
+    const ok = await call(
+      ctx,
+      'POST',
+      '/api/roles',
+      { name: 'Viewer', capabilities: ['company.view', 'roles.view'] },
+      clerk.cookie,
+    );
+    expect(ok.status).toBe(201);
+    const remove = await call(
+      ctx,
+      'PATCH',
+      `/api/roles/${ctx.co.roleIds.client}`,
+      { version: 1, capabilities: ['company.view'] },
+      clerk.cookie,
+    );
+    expect(remove.status).toBe(200);
+    expect(await auditFor(ctx.co.companyId, role.id)).toHaveLength(1); // only role.created
+  });
+
+  it('role names are unique ignoring case → 409 role_name_taken', async () => {
+    const ctx = await setup();
+    await createRole(ctx, 'Safety Officer', []);
+    const r = await call(ctx, 'POST', '/api/roles', { name: 'safety officer', capabilities: [] });
+    expect(r.status).toBe(409);
+    expect((await errorOf(r)).code).toBe('role_name_taken');
+    const sys = await call(ctx, 'POST', '/api/roles', { name: 'SUPER ADMIN', capabilities: [] });
+    expect(sys.status).toBe(409);
+    // Changing only the case of a role's own name is allowed.
+    const role = (await listRoles(ctx)).find((x) => x.name === 'Safety Officer')!;
+    const recase = await call(ctx, 'PATCH', `/api/roles/${role.id}`, {
+      version: 1,
+      name: 'Safety officer',
+    });
+    expect(recase.status).toBe(200);
+  });
+});
