@@ -14,6 +14,19 @@ Railway has retired "config as code" files (`railway.json`), so all settings bel
 
 All three must keep these exact names, because the variables below refer to them.
 
+## Before merging or deploying Plan 2 (do this first)
+
+> **Important.** From Plan 2 onwards the `api` service **will not start** unless three new variables are set. Railway deploys `main` automatically, so set them **before** the Plan 2 changes are merged. If you merge first, the new `api` deployment keeps crashing (Railway keeps the old version running, but the deploy shows red until you add them).
+
+1. In Railway, make sure the environment at the top says **production**.
+2. Open the `api` service, then **Variables**.
+3. Add these three (the **Variables** table below explains each one):
+   - `BETTER_AUTH_SECRET`: a new random secret, letters and digits only, 48 characters.
+   - `APP_BASE_URL`: `https://web-production-a648e.up.railway.app` (the `web` address, no `/` at the end).
+   - `PLATFORM_ADMIN_EMAILS`: your own email address.
+4. Click **Deploy** to apply the changes. The current (Plan 1) version keeps running; it simply ignores the new variables.
+5. Only now merge the Plan 2 changes into `main`. When the new deploy finishes, run the checks in **Check that it works**.
+
 ## Service settings
 
 Both services use the GitHub repo `hiralpatel2D/SiteApp`, branch `main`, root directory `/`, builder **Railpack**, and restart policy **On failure** (5 retries).
@@ -51,10 +64,17 @@ Type the `${{ ... }}` parts exactly. Railway fills them in itself, and in each e
 
 ## Staging (a test copy)
 
+A duplicated environment copies production's variables. Some of them **must** be changed in staging, or staging will block every sign-in and its emails will link to production.
+
 1. At the top of the project, click the environment name (**production**), then **New Environment**, then **Duplicate Environment**. Pick **production** and name it `staging`.
 2. Railway shows the copied services as pending changes. Review them and click **Deploy**.
-3. In staging, open `api`, then **Variables**, and give `APP_DB_PASSWORD` a different random password (letters and digits only).
-4. In staging, open `web`, then **Settings**, then **Networking**, and click **Generate Domain**. Do this for `web` only.
+3. In staging, open `web`, then **Settings**, then **Networking**, and click **Generate Domain**. Do this for `web` only. Copy the new address (it starts with `https://`).
+4. In staging, open `api`, then **Variables**, and change these:
+   - `APP_DB_PASSWORD`: a **different** random password (letters and digits only, 40 characters).
+   - `BETTER_AUTH_SECRET`: a **different** random secret (letters and digits only, 48 characters). Never reuse production's.
+   - `APP_BASE_URL`: the **staging** `web` address from step 3, with no `/` at the end. (If it still shows the production address, staging blocks every form with "Request blocked.")
+   - `PLATFORM_ADMIN_EMAILS`: can stay the same as production.
+5. Click **Deploy** to apply the changes, then run the checks below on the staging address.
 
 ## Check that it works
 
