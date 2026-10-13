@@ -43,6 +43,10 @@ jobs:
       - run: pnpm test
       - run: pnpm build
       - run: pnpm --filter web exec playwright install --with-deps chromium
+      # Starts the API (it migrates the test database first) and the web preview,
+      # which proxies /api to it. The database settings come from the job env above.
       - run: pnpm --filter web exec playwright test
         env:
           CI: true
+          APP_BASE_URL: http://localhost:4173
+          API_URL: http://localhost:3000

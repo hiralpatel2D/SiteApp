@@ -37,6 +37,9 @@ Both services use the GitHub repo `hiralpatel2D/SiteApp`, branch `main`, root di
 | `APP_DB_PASSWORD`        | Its own long random password: letters and digits only, 40 characters. **Never** `${{Postgres.PGPASSWORD}}`, because the app's limited account must not share the master password. |
 | `MIGRATION_DATABASE_URL` | `${{Postgres.DATABASE_URL}}`                                                                          |
 | `DATABASE_URL`           | `postgresql://app_user:${{APP_DB_PASSWORD}}@${{Postgres.PGHOST}}:${{Postgres.PGPORT}}/${{Postgres.PGDATABASE}}` |
+| `BETTER_AUTH_SECRET`     | Its own long random secret: letters and digits only, 48 characters. It protects sign-in sessions. Use a different one in each environment, and never share it. |
+| `APP_BASE_URL`           | The `web` public address, starting with `https://` and with no `/` at the end, e.g. `https://web-production-a648e.up.railway.app`. Invite and password-reset links use it. |
+| `PLATFORM_ADMIN_EMAILS`  | The owner's email address. Only this email can create an account without an invitation, and it can create companies. To allow more than one, separate them with commas. |
 
 **`web` service**
 

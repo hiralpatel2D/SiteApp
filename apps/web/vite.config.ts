@@ -4,7 +4,13 @@ import tailwindcss from '@tailwindcss/vite';
 import { tanstackRouter } from '@tanstack/router-plugin/vite';
 import { VitePWA } from 'vite-plugin-pwa';
 
+// Dev and preview serve the app and the API from one origin, as production does
+// (apps/web/server.mjs), so cookies and the API's Origin check just work.
+const apiProxy = { '/api': { target: process.env.API_URL || 'http://localhost:3000' } };
+
 export default defineConfig({
+  server: { proxy: apiProxy },
+  preview: { proxy: apiProxy },
   plugins: [
     tanstackRouter({ target: 'react', autoCodeSplitting: true }),
     react(),
