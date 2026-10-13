@@ -1,0 +1,11 @@
+node_modules
+dist
+coverage
+playwright-report
+test-results
+.pgdata
+.superpowers
+pnpm-lock.yaml
+docs
+apps/api/drizzle
+apps/web/src/routeTree.gen.ts
