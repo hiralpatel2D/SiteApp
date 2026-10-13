@@ -1,7 +1,7 @@
 # Site Diary — Core Platform Design
 
 **Date:** 2026-10-13
-**Status:** Draft, awaiting owner approval
+**Status:** Approved by owner (2026-10-13)
 **Repo:** `SiteApp` · **Hosting:** Railway
 
 ---
@@ -234,18 +234,19 @@ So that offline capture can be added later without a rewrite:
 | Offline | Online-only first, built ready for offline |
 | Stack | Left to Claude (choices in §7.1 are Claude's recommendation; owner accepted) |
 | Theme | Field Ops is the default; Swiss v2 kept as a switchable theme |
-| Process | The approved motion demo is the visual reference. **No further demo per milestone.** A new demo is needed only if the look and feel itself is to change. *(Claude's reading of "4: No"; owner to confirm.)* |
+| Process | The approved motion demo is the visual reference. **No further demo per milestone.** A new demo is needed only if the look and feel itself is to change.  |
 | Signup | Invite-only. The platform admin creates companies; no public signup |
 | Roles | One role per person per company (not per project) |
 | Custom roles | Yes. Companies can create their own roles on top of the nine system roles |
 
-## 12. Calls made by Claude (owner to check)
+## 12. Calls made by Claude (all confirmed by owner on 2026-10-13)
 
 - A user can belong to several companies with a different role in each.
 - Platform admin (app owner) role exists above all companies, with a minimal UI.
-- Billing deferred; `plan` field placeholder only.
+- Billing deferred; `plan` field placeholder only. The owner invoices companies outside the app at first.
 - Default permission matrix as in §6.3. Editable per company.
 - RLS as the isolation mechanism (§7.4).
+- Per-company subdomains come in a later phase.
 - Monorepo with pnpm; Hono for the API; Better Auth.
 - Staging + production environments on Railway.
 - Audit log from day one.
