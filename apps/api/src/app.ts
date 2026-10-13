@@ -7,6 +7,7 @@ import type { Pools } from './db/pools';
 import type { EmailSender } from './email/email';
 import { errorHandler, notFoundHandler } from './http/errors';
 import { requireSameOrigin } from './http/origin';
+import { invitationRoutes } from './invitations/routes';
 import { companyContextRoutes } from './tenant/context';
 
 export type AppDeps = {
@@ -44,6 +45,7 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
   api.use('*', sessionMiddleware(auth));
   api.route('/', meRoutes(deps.pools));
   api.route('/', companyContextRoutes(deps.pools));
+  api.route('/invitations', invitationRoutes({ ...deps, auth }));
   app.route('/api', api);
   return app;
 }
