@@ -155,6 +155,38 @@ describe('web server', () => {
     expect(h['x-client-ip']).toBe('203.0.113.9');
   });
 
+  it('prefers x-real-ip (set by the Railway edge) over x-forwarded-for and a client-sent x-client-ip', async () => {
+    const r = await web.request('/api/headers', {
+      headers: {
+        'x-real-ip': '203.0.113.50',
+        'x-forwarded-for': '198.51.100.7, 203.0.113.9',
+        'x-client-ip': '192.0.2.66',
+      },
+    });
+    const h = (await r.json()) as Record<string, string>;
+    expect(h['x-client-ip']).toBe('203.0.113.50');
+  });
+
+  it('accepts an IPv6 x-real-ip', async () => {
+    const r = await web.request('/api/headers', {
+      headers: { 'x-real-ip': ' 2001:db8::1 ', 'x-forwarded-for': '203.0.113.9' },
+    });
+    const h = (await r.json()) as Record<string, string>;
+    expect(h['x-client-ip']).toBe('2001:db8::1');
+  });
+
+  it('ignores an invalid x-real-ip and falls back to the right-most x-forwarded-for entry', async () => {
+    const r = await web.request('/api/headers', {
+      headers: {
+        'x-real-ip': 'not-an-ip',
+        'x-forwarded-for': '198.51.100.7, 203.0.113.9',
+        'x-client-ip': '192.0.2.66',
+      },
+    });
+    const h = (await r.json()) as Record<string, string>;
+    expect(h['x-client-ip']).toBe('203.0.113.9');
+  });
+
   it('drops a client-sent x-client-ip when there is no forwarding information', async () => {
     const r = await web.request('/api/headers', { headers: { 'x-client-ip': '192.0.2.66' } });
     const h = (await r.json()) as Record<string, string>;

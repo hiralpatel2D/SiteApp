@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { Hono } from 'hono';
 import { serve } from '@hono/node-server';
 import { getConnInfo } from '@hono/node-server/conninfo';
+import { isIP } from 'node:net';
 
 const TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -79,16 +80,20 @@ export function createWebServer({ distDir, apiUrl }) {
     const priorFor = c.req.header('x-forwarded-for');
     const forwardedFor = [priorFor, clientAddr].filter(Boolean).join(', ');
     if (forwardedFor) headers.set('x-forwarded-for', forwardedFor);
-    // The client IP the API trusts (auth rate limiting, session records). The
-    // platform edge (Railway) appends the real client address as the RIGHT-most
-    // x-forwarded-for entry; anything to its left is client-controlled. Without
-    // forwarding information, use the socket peer.
+    // The client IP the API trusts (auth and invite rate limiting, session
+    // records). Railway's edge documents X-Real-IP as the client's remote IP, so
+    // prefer it when it holds a valid address. Otherwise fall back to the
+    // RIGHT-most x-forwarded-for entry (anything to its left is
+    // client-controlled), then to the socket peer.
+    const realIp = c.req.header('x-real-ip')?.trim();
     const clientIp =
+      (realIp && isIP(realIp) ? realIp : undefined) ??
       priorFor
         ?.split(',')
         .map((p) => p.trim())
         .filter(Boolean)
-        .at(-1) ?? clientAddr;
+        .at(-1) ??
+      clientAddr;
     if (clientIp) headers.set('x-client-ip', clientIp);
     const proto =
       c.req.header('x-forwarded-proto')?.split(',')[0]?.trim().toLowerCase() === 'https'

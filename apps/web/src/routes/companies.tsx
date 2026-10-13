@@ -20,7 +20,8 @@ function Companies() {
       (data) => {
         if (!live) return;
         const only = data.memberships.length === 1 ? data.memberships[0] : undefined;
-        if (only && only.companyStatus === 'active') {
+        // Platform admins stay on the picker so they can reach Platform admin.
+        if (only && only.companyStatus === 'active' && !data.user.isPlatformAdmin) {
           setActiveCompany(only.companyId);
           void navigate({ to: '/home', replace: true });
           return;

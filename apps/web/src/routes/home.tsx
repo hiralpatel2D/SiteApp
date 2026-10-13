@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, createFileRoute, useNavigate } from '@tanstack/react-router';
 import { ApiError, api, errorMessage } from '../lib/api';
-import { signOut } from '../lib/auth';
+import { fetchMe, signOut } from '../lib/auth';
 import { getActiveCompany, setActiveCompany } from '../lib/company';
 import {
   Alert,
@@ -25,6 +25,7 @@ function Home() {
   const navigate = useNavigate();
   const [ctx, setCtx] = useState<CompanyContext | null>(null);
   const [error, setError] = useState('');
+  const [platformAdmin, setPlatformAdmin] = useState(false);
 
   useEffect(() => {
     if (!getActiveCompany()) {
@@ -32,6 +33,11 @@ function Home() {
       return;
     }
     let live = true;
+    // Only decides whether to show the Platform admin link; failures hide it.
+    fetchMe().then(
+      (me) => live && setPlatformAdmin(me.user.isPlatformAdmin),
+      () => undefined,
+    );
     api<CompanyContext>('/api/company/context').then(
       (data) => live && setCtx(data),
       (err: unknown) => {
@@ -80,10 +86,15 @@ function Home() {
           </p>
         </div>
       )}
-      <nav className="mt-6">
+      <nav className="mt-6 flex flex-wrap gap-x-6 gap-y-3">
         <Link to="/companies" className={linkClass}>
           Switch company
         </Link>
+        {platformAdmin && (
+          <Link to="/platform" className={linkClass}>
+            Platform admin
+          </Link>
+        )}
       </nav>
     </Screen>
   );
