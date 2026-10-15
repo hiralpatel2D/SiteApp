@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { FormEvent } from 'react';
 import { Link, useNavigate } from '@tanstack/react-router';
-import { authClient, authErrorMessage, fetchMe } from '../lib/auth';
+import { authClient, authErrorMessage, fetchMe, landingFor } from '../lib/auth';
 import { errorMessage } from '../lib/api';
 import { ThemeSwitcher } from './ThemeSwitcher';
 import { Alert, Logo, linkClass, primaryButton } from './ui';
@@ -33,9 +33,7 @@ export function SignIn() {
         setError(authErrorMessage(authError));
         return;
       }
-      const me = await fetchMe();
-      const platformOnly = me.user.isPlatformAdmin && me.memberships.length === 0;
-      await navigate({ to: platformOnly ? '/platform' : '/companies' });
+      await navigate({ to: landingFor(await fetchMe()) });
     } catch (err) {
       setError(errorMessage(err));
     } finally {

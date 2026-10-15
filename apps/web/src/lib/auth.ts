@@ -1,5 +1,5 @@
 import { createAuthClient } from 'better-auth/client';
-import { api } from './api';
+import { ApiError, api } from './api';
 import { setActiveCompany } from './company';
 
 /** Better Auth client; same origin, so the browser sets `Origin` and cookies. */
@@ -19,9 +19,27 @@ export type Membership = {
 };
 
 export type Me = {
-  user: { id: string; name: string; email: string; isPlatformAdmin: boolean };
+  user: {
+    id: string;
+    name: string;
+    email: string;
+    isPlatformAdmin: boolean;
+    /** Set for a bootstrapped owner: the API refuses everything else until it is changed. */
+    mustChangePassword: boolean;
+  };
   memberships: Membership[];
 };
+
+/** Where a signed-in user goes next: the forced password change comes first. */
+export function landingFor(me: Me): '/change-password' | '/platform' | '/companies' {
+  if (me.user.mustChangePassword) return '/change-password';
+  return me.user.isPlatformAdmin && me.memberships.length === 0 ? '/platform' : '/companies';
+}
+
+/** True for the API's 403 `password_change_required`. */
+export function isPasswordChangeRequired(err: unknown): boolean {
+  return err instanceof ApiError && err.status === 403 && err.code === 'password_change_required';
+}
 
 export const fetchMe = () => api<Me>('/api/me', { company: null });
 

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, createFileRoute, useNavigate } from '@tanstack/react-router';
 import { ApiError, api, errorMessage } from '../lib/api';
-import { fetchMe, signOut } from '../lib/auth';
+import { fetchMe, isPasswordChangeRequired, signOut } from '../lib/auth';
 import { getActiveCompany, setActiveCompany } from '../lib/company';
 import {
   Alert,
@@ -34,8 +34,18 @@ function Home() {
     }
     let live = true;
     // Only decides whether to show the Platform admin link; failures hide it.
+    // Decides whether to show the Platform admin link (failures hide it), and
+    // sends a user who must change their password to do that first.
     fetchMe().then(
-      (me) => live && setPlatformAdmin(me.user.isPlatformAdmin),
+      (me) => {
+        if (!live) return;
+        if (me.user.mustChangePassword) {
+          live = false;
+          void navigate({ to: '/change-password', replace: true });
+          return;
+        }
+        setPlatformAdmin(me.user.isPlatformAdmin);
+      },
       () => undefined,
     );
     api<CompanyContext>('/api/company/context').then(
@@ -44,6 +54,11 @@ function Home() {
         if (!live) return;
         if (err instanceof ApiError && err.status === 401) {
           void navigate({ to: '/', replace: true });
+          return;
+        }
+        // Checked before the generic 403 below, which would forget the company.
+        if (isPasswordChangeRequired(err)) {
+          void navigate({ to: '/change-password', replace: true });
           return;
         }
         // Not a member any more, suspended, unknown or no company: choose again.

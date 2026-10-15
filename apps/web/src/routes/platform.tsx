@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { ApiError, api, errorMessage } from '../lib/api';
-import { fetchMe, signOut } from '../lib/auth';
+import { fetchMe, isPasswordChangeRequired, signOut } from '../lib/auth';
 import {
   Alert,
   Field,
@@ -39,15 +39,23 @@ function Platform() {
       setCompanies(await api<Company[]>('/api/platform/companies', { company: null }));
       setListError('');
     } catch (err) {
+      if (isPasswordChangeRequired(err)) {
+        void navigate({ to: '/change-password', replace: true });
+        return;
+      }
       setListError(errorMessage(err));
     }
-  }, []);
+  }, [navigate]);
 
   useEffect(() => {
     let live = true;
     fetchMe().then(
       async (me) => {
         if (!live) return;
+        if (me.user.mustChangePassword) {
+          void navigate({ to: '/change-password', replace: true });
+          return;
+        }
         if (!me.user.isPlatformAdmin) {
           setState('forbidden');
           return;

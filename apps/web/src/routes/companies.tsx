@@ -19,6 +19,10 @@ function Companies() {
     fetchMe().then(
       (data) => {
         if (!live) return;
+        if (data.user.mustChangePassword) {
+          void navigate({ to: '/change-password', replace: true });
+          return;
+        }
         const only = data.memberships.length === 1 ? data.memberships[0] : undefined;
         // Platform admins stay on the picker so they can reach Platform admin.
         if (only && only.companyStatus === 'active' && !data.user.isPlatformAdmin) {
