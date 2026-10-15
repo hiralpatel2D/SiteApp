@@ -14,7 +14,13 @@ const json = (status: number, body: unknown) =>
 
 function me(isPlatformAdmin: boolean) {
   return {
-    user: { id: 'u1', name: 'Owner', email: 'owner@example.test', isPlatformAdmin },
+    user: {
+      id: 'u1',
+      name: 'Owner',
+      email: 'owner@example.test',
+      isPlatformAdmin,
+      mustChangePassword: false,
+    },
     memberships: [
       {
         companyId: COMPANY_ID,

@@ -29,6 +29,13 @@
       "when": 1791911430450,
       "tag": "0003_projects_status_check",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1792071756530,
+      "tag": "0004_must_change_password",
+      "breakpoints": true
     }
   ]
 }

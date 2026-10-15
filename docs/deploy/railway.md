@@ -54,6 +54,9 @@ Both services use the GitHub repo `hiralpatel2D/SiteApp`, branch `main`, root di
 | `APP_BASE_URL`           | The `web` public address, starting with `https://` and with no `/` at the end, e.g. `https://web-production-a648e.up.railway.app`. Invite and password-reset links use it. |
 | `PLATFORM_ADMIN_EMAILS`  | The owner's email address. Only this email can create an account without an invitation, and it can create companies. To allow more than one, separate them with commas. |
 
+| `BOOTSTRAP_OWNER_EMAIL`    | Optional, see **First owner login**. The owner's email; it must also be in `PLATFORM_ADMIN_EMAILS`. |
+| `BOOTSTRAP_OWNER_PASSWORD` | Optional, see **First owner login**. A temporary password (at least 8 characters). Delete it after the first sign-in. |
+
 **`web` service**
 
 | Variable           | Value                                                 |
@@ -61,6 +64,17 @@ Both services use the GitHub repo `hiralpatel2D/SiteApp`, branch `main`, root di
 | `API_INTERNAL_URL` | `http://${{api.RAILWAY_PRIVATE_DOMAIN}}:${{api.PORT}}` |
 
 Type the `${{ ... }}` parts exactly. Railway fills them in itself, and in each environment it uses that environment's own database.
+
+## First owner login
+
+Instead of using the **Create owner account** page, the `api` service can create the owner's account for you when it starts.
+
+1. In `api`, then **Variables**, add both of these (set both or neither, or `api` will not start):
+   - `BOOTSTRAP_OWNER_EMAIL`: the owner's email. It must also be listed in `PLATFORM_ADMIN_EMAILS`.
+   - `BOOTSTRAP_OWNER_PASSWORD`: a temporary password, at least 8 characters.
+2. Click **Deploy**. If no account with that email exists yet, the `api` logs show `Owner account created for <email>; password change required at first sign-in.` If the account already exists, nothing changes: its password is **never** reset by these variables.
+3. Sign in on the `web` address with that email and the temporary password. Site Diary asks you to **Set a new password** (at least 10 characters) before anything else works. After saving, you land on **Platform admin**, and every other signed-in device is signed out.
+4. **Then delete `BOOTSTRAP_OWNER_PASSWORD`** from the `api` variables (and `BOOTSTRAP_OWNER_EMAIL` too, if you like) and click **Deploy**. The temporary password no longer works, but it should not stay stored in Railway.
 
 ## Staging (a test copy)
 

@@ -142,6 +142,8 @@ export const users = pgTable(
     emailVerified: boolean('email_verified').notNull().default(false),
     image: text('image'),
     isPlatformAdmin: boolean('is_platform_admin').notNull().default(false),
+    /** Set for a bootstrapped owner: every API call but /me and /me/password is refused until cleared. */
+    mustChangePassword: boolean('must_change_password').notNull().default(false),
   },
   (t) => [check('users_email_lowercase_check', sql`${t.email} = lower(${t.email})`)],
 );

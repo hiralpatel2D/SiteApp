@@ -71,6 +71,12 @@ export function createAuth(deps: AuthDeps) {
       additionalFields: {
         // Server-controlled: never accepted from sign-up or update-user input.
         isPlatformAdmin: { type: 'boolean', input: false, defaultValue: false, required: false },
+        mustChangePassword: {
+          type: 'boolean',
+          input: false,
+          defaultValue: false,
+          required: false,
+        },
       },
     },
     session: { modelName: 'sessions' },
@@ -256,4 +262,11 @@ export async function normaliseAuthResponse(res: Response): Promise<Response> {
 }
 
 /** Shape of `auth.api.getSession` users, as exposed to route handlers. */
-export type SessionUser = { id: string; email: string; name: string; isPlatformAdmin: boolean };
+export type SessionUser = {
+  id: string;
+  email: string;
+  name: string;
+  isPlatformAdmin: boolean;
+  /** While true, only `/api/me`, `/api/me/password` and `/api/auth/*` answer. */
+  mustChangePassword: boolean;
+};
