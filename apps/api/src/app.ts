@@ -48,7 +48,7 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
       : c.json({ status: 'degraded', db: 'down' }, 503);
   });
   api.use('*', sessionMiddleware(auth));
-  api.route('/', meRoutes(deps.pools));
+  api.route('/', meRoutes(deps.pools, auth));
   api.route('/', companyContextRoutes(deps.pools));
   api.route('/invitations', invitationRoutes({ ...deps, auth }));
   api.route('/platform', platformRoutes(deps));

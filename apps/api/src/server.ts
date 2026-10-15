@@ -2,6 +2,7 @@ import type { Server } from 'node:http';
 import { serve } from '@hono/node-server';
 import { loadConfig } from './config';
 import { createApp } from './app';
+import { bootstrapOwner } from './auth/bootstrap';
 import { createPools } from './db/pools';
 import { consoleEmailSender } from './email/email';
 
@@ -24,6 +25,16 @@ const checkDb = async (): Promise<boolean> => {
     return false;
   }
 };
+
+// Migrations have run already (the start command runs db:migrate first).
+try {
+  await bootstrapOwner({ pools, config });
+} catch (err) {
+  console.error(
+    `Owner account bootstrap failed: ${err instanceof Error ? err.message : String(err)}`,
+  );
+  process.exit(1);
+}
 
 const app = createApp({ checkDb, pools, config, email: consoleEmailSender });
 const server = serve({ fetch: app.fetch, port: config.port }, (info) => {

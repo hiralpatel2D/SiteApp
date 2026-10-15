@@ -140,6 +140,7 @@ export async function seedUser(input: {
   password: string;
   name: string;
   isPlatformAdmin?: boolean;
+  mustChangePassword?: boolean;
 }): Promise<{ id: string; email: string }> {
   const id = newId();
   const email = input.email.trim().toLowerCase();
@@ -149,6 +150,7 @@ export async function seedUser(input: {
     name: input.name,
     emailVerified: false,
     isPlatformAdmin: input.isPlatformAdmin ?? false,
+    mustChangePassword: input.mustChangePassword ?? false,
   });
   await ownerDb.insert(accounts).values({
     id: newId(),

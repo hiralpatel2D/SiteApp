@@ -10,7 +10,13 @@ useTestDb();
 const PASSWORD = 'longpassword1';
 
 type Me = {
-  user: { id: string; name: string; email: string; isPlatformAdmin: boolean };
+  user: {
+    id: string;
+    name: string;
+    email: string;
+    isPlatformAdmin: boolean;
+    mustChangePassword: boolean;
+  };
   memberships: Array<{
     companyId: string;
     companyName: string;
@@ -69,6 +75,7 @@ describe('GET /api/me', () => {
       name: 'Priya',
       email: 'pm@x.test',
       isPlatformAdmin: false,
+      mustChangePassword: false,
     });
     expect(body.memberships).toEqual([
       {
