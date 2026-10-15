@@ -63,6 +63,10 @@ function setup(capabilities: string[], projects: unknown[]) {
       posted = JSON.parse(String(init.body));
       return Promise.resolve(json(201, project(P2, 'Lake View', 'LV-1')));
     }
+    if (url.includes('/api/projects/') && init?.method === 'PATCH') {
+      posted = JSON.parse(String(init.body));
+      return Promise.resolve(json(200, {}));
+    }
     if (url.includes('/api/projects')) return Promise.resolve(json(200, projects));
     return Promise.resolve(json(404, { error: { code: 'not_found', message: 'Not found.' } }));
   });
@@ -152,6 +156,18 @@ describe('Projects page', () => {
     renderAt('/projects');
     expect(await screen.findByText('Riverside Tower')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Add project' })).toBeNull();
-    expect(screen.queryByRole('button', { name: /Archive/ })).toBeNull();
+    expect(screen.queryByRole('switch')).toBeNull();
+    expect(screen.getByText('Active')).toBeTruthy();
+  });
+
+  it('the Active switch makes a project inactive (and back)', async () => {
+    const api = setup(ALL, [project(P1, 'Riverside Tower', 'RT-P2')]);
+    renderAt('/projects');
+    const toggle = await screen.findByRole('switch', { name: 'Riverside Tower active' });
+    expect(toggle.getAttribute('aria-checked')).toBe('true');
+    await userEvent.click(toggle);
+    expect(toggle.getAttribute('aria-checked')).toBe('false');
+    expect(screen.getByText('Inactive')).toBeTruthy();
+    expect(api.posted()).toEqual({ version: 1, status: 'archived' });
   });
 });
