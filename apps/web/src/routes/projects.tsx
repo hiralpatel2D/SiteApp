@@ -5,7 +5,7 @@ import { ApiError, api, errorMessage } from '../lib/api';
 import { setActiveProject, type Project } from '../lib/project';
 import { AppShell, useCan, useShell } from '../components/AppShell';
 import { Icon } from '../components/icons';
-import { Alert, Field, Loading, PrimaryButton, secondaryButton } from '../components/ui';
+import { Alert, Field, Loading, PrimaryButton } from '../components/ui';
 
 export const Route = createFileRoute('/projects')({ component: Projects });
 
@@ -41,39 +41,39 @@ function ProjectsBody() {
 
   if (!canView) return <Alert>You do not have permission to do this.</Alert>;
 
-  const active = projects?.filter((p) => p.status === 'active') ?? [];
-  const archived = projects?.filter((p) => p.status !== 'active') ?? [];
+  const activeCount = projects?.filter((p) => p.status === 'active').length ?? 0;
 
   return (
     <div className="flex flex-col gap-8">
       {canManage && <CreateProject onCreated={load} />}
       <Alert>{error}</Alert>
-      <section aria-labelledby="active-heading" className="flex flex-col gap-3">
-        <h2 id="active-heading" className={heading}>
-          Active projects
-        </h2>
+      <section aria-labelledby="list-heading" className="flex flex-col gap-3">
+        <div className="flex items-baseline justify-between gap-3">
+          <h2 id="list-heading" className={heading}>
+            Your projects
+          </h2>
+          {projects && projects.length > 0 && (
+            <span className="font-mono text-[11px] uppercase tracking-widest text-muted">
+              {activeCount} of {projects.length} active
+            </span>
+          )}
+        </div>
         {!projects && <Loading />}
-        {projects && active.length === 0 && !error && (
-          <p className="text-muted">No active projects yet.</p>
+        {projects && projects.length === 0 && !error && (
+          <p className="text-muted">No projects yet.</p>
         )}
         <ul className="flex flex-col gap-2">
-          {active.map((p) => (
+          {projects?.map((p) => (
             <ProjectRow key={p.id} project={p} canManage={canManage} onChanged={load} />
           ))}
         </ul>
+        {projects && projects.length > 0 && (
+          <p className="text-sm text-muted">
+            Inactive projects are hidden from Home and from everyday work. Their records are kept,
+            and you can make them active again at any time.
+          </p>
+        )}
       </section>
-      {archived.length > 0 && (
-        <section aria-labelledby="archived-heading" className="flex flex-col gap-3">
-          <h2 id="archived-heading" className={heading}>
-            Archived
-          </h2>
-          <ul className="flex flex-col gap-2">
-            {archived.map((p) => (
-              <ProjectRow key={p.id} project={p} canManage={canManage} onChanged={load} />
-            ))}
-          </ul>
-        </section>
-      )}
     </div>
   );
 }
@@ -171,30 +171,44 @@ function ProjectRow({
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const archived = project.status !== 'active';
-  const action = archived ? 'Restore' : 'Archive';
+  // Shown immediately; reverts if the save fails.
+  const [active, setActive] = useState(project.status === 'active');
+  useEffect(() => setActive(project.status === 'active'), [project.status]);
 
   async function toggle() {
+    const next = !active;
+    setActive(next);
     setBusy(true);
     setError('');
     try {
       await api(`/api/projects/${project.id}`, {
         method: 'PATCH',
-        body: { version: project.version, status: archived ? 'active' : 'archived' },
+        body: { version: project.version, status: next ? 'active' : 'archived' },
       });
       await onChanged();
     } catch (err) {
+      setActive(!next);
       setError(errorMessage(err));
     } finally {
       setBusy(false);
     }
   }
 
+  const stateLabel = active ? 'Active' : 'Inactive';
+
   return (
     <li className="flex flex-col gap-2">
-      <div className="flex min-w-0 items-center justify-between gap-3 rounded-[var(--r)] border border-line bg-card px-4 py-3">
+      <div
+        className={`flex min-w-0 items-center justify-between gap-3 rounded-[var(--r)] border border-line bg-card px-4 py-3 transition-opacity duration-300 ${
+          active ? '' : 'opacity-60'
+        }`}
+      >
         <div className="flex min-w-0 items-start gap-3">
-          <span className="mt-0.5 grid size-9 shrink-0 place-items-center rounded-[10px] bg-icon-bg text-icon-fg">
+          <span
+            className={`mt-0.5 grid size-9 shrink-0 place-items-center rounded-[10px] transition-colors duration-300 ${
+              active ? 'bg-icon-bg text-icon-fg' : 'bg-surface text-muted'
+            }`}
+          >
             <Icon name="pin" size={18} />
           </span>
           <div className="flex min-w-0 flex-col">
@@ -205,16 +219,34 @@ function ProjectRow({
             </span>
           </div>
         </div>
-        {canManage && (
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => void toggle()}
-            aria-label={`${action} ${project.name}`}
-            className={secondaryButton}
-          >
-            {action}
-          </button>
+        {canManage ? (
+          <label className="flex shrink-0 cursor-pointer items-center gap-2.5">
+            <span className="w-[62px] text-right font-mono text-[11px] font-medium uppercase tracking-widest">
+              {stateLabel}
+            </span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={active}
+              aria-label={`${project.name} active`}
+              disabled={busy}
+              onClick={() => void toggle()}
+              className={`relative h-7 w-12 shrink-0 cursor-pointer rounded-full border transition-colors duration-300 disabled:cursor-default ${
+                active ? 'border-good bg-good' : 'border-field-line bg-surface'
+              }`}
+            >
+              <span
+                aria-hidden="true"
+                className={`absolute top-0.5 size-[22px] rounded-full bg-card shadow transition-[left] duration-300 ease-(--spring) ${
+                  active ? 'left-[22px]' : 'left-0.5'
+                }`}
+              />
+            </button>
+          </label>
+        ) : (
+          <span className="shrink-0 font-mono text-[11px] font-medium uppercase tracking-widest text-muted">
+            {stateLabel}
+          </span>
         )}
       </div>
       <Alert>{error}</Alert>
