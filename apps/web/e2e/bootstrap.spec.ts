@@ -93,6 +93,16 @@ test('platform admin → company → invite → super admin lands in home', asyn
   await expect(page.getByRole('link', { name: 'Share on WhatsApp' })).toBeVisible();
   await expect(page.getByText(/ravi@mehtainfra\.example/).first()).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Waiting to join' })).toBeVisible();
+
+  // Add the first project; Home then opens on it with the module tiles.
+  await menu.getByRole('link', { name: 'Projects' }).click();
+  await page.getByLabel('Project name').fill('Riverside Tower');
+  await page.getByLabel('Short code').fill('RT-P2');
+  await page.getByRole('button', { name: 'Add project' }).click();
+  await expect(page.getByText('Riverside Tower added. It now opens on Home.')).toBeVisible();
+  await menu.getByRole('link', { name: 'Home' }).click();
+  await expect(page.getByRole('heading', { name: 'Riverside Tower' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Self Attendance' })).toBeVisible();
 });
 
 test('invite link opened twice shows "This invitation has already been used."', async ({
