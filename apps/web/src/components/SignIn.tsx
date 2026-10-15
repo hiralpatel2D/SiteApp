@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { FormEvent } from 'react';
-import { useNavigate } from '@tanstack/react-router';
+import { Link, useNavigate } from '@tanstack/react-router';
 import { authClient, authErrorMessage, fetchMe } from '../lib/auth';
 import { errorMessage } from '../lib/api';
 import { ThemeSwitcher } from './ThemeSwitcher';
@@ -132,6 +132,9 @@ export function SignIn() {
           >
             Forgot password?
           </button>
+          <Link to="/setup" className={`${linkClass} self-start text-sm`}>
+            App owner? Create owner account
+          </Link>
         </form>
       ) : (
         <form onSubmit={onForgot} className="flex flex-col gap-4">
