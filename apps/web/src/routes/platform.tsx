@@ -1,18 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { ApiError, api, errorMessage } from '../lib/api';
-import { fetchMe, isPasswordChangeRequired, signOut } from '../lib/auth';
-import {
-  Alert,
-  Field,
-  Loading,
-  PageTitle,
-  PrimaryButton,
-  Screen,
-  SecondaryButton,
-  labelClass,
-} from '../components/ui';
+import { isPasswordChangeRequired } from '../lib/auth';
+import { AppShell, useShell } from '../components/AppShell';
+import { InviteLink } from '../components/InviteLink';
+import { Alert, Field, Loading, PrimaryButton, SecondaryButton } from '../components/ui';
 
 type Company = {
   id: string;
@@ -29,8 +22,17 @@ const FORBIDDEN = 'You do not have permission to do this.';
 export const Route = createFileRoute('/platform')({ component: Platform });
 
 function Platform() {
+  return (
+    <AppShell title="Platform admin" company={false}>
+      <PlatformBody />
+    </AppShell>
+  );
+}
+
+function PlatformBody() {
   const navigate = useNavigate();
-  const [state, setState] = useState<'loading' | 'ready' | 'forbidden'>('loading');
+  const { me } = useShell();
+  const [loaded, setLoaded] = useState(false);
   const [companies, setCompanies] = useState<Company[]>([]);
   const [listError, setListError] = useState('');
 
@@ -48,73 +50,35 @@ function Platform() {
   }, [navigate]);
 
   useEffect(() => {
+    if (!me.user.isPlatformAdmin) return;
     let live = true;
-    fetchMe().then(
-      async (me) => {
-        if (!live) return;
-        if (me.user.mustChangePassword) {
-          void navigate({ to: '/change-password', replace: true });
-          return;
-        }
-        if (!me.user.isPlatformAdmin) {
-          setState('forbidden');
-          return;
-        }
-        await load();
-        if (live) setState('ready');
-      },
-      (err: unknown) => {
-        if (!live) return;
-        if (err instanceof ApiError && err.status === 401) {
-          void navigate({ to: '/', replace: true });
-          return;
-        }
-        setListError(errorMessage(err));
-        setState('ready');
-      },
-    );
+    void load().then(() => live && setLoaded(true));
     return () => {
       live = false;
     };
-  }, [load, navigate]);
+  }, [load, me.user.isPlatformAdmin]);
 
-  async function onSignOut() {
-    await signOut().catch(() => undefined);
-    await navigate({ to: '/' });
-  }
-
-  const aside = <SecondaryButton onClick={() => void onSignOut()}>Sign out</SecondaryButton>;
-
+  if (!me.user.isPlatformAdmin) return <Alert>{FORBIDDEN}</Alert>;
+  if (!loaded) return <Loading />;
   return (
-    <Screen aside={aside}>
-      <PageTitle>Platform admin</PageTitle>
-      <div className="mt-6 flex flex-col gap-8">
-        {state === 'loading' && <Loading />}
-        {state === 'forbidden' && <Alert>{FORBIDDEN}</Alert>}
-        {state === 'ready' && (
-          <>
-            <CreateCompany onCreated={load} />
-            <section aria-labelledby="companies-heading" className="flex flex-col gap-3">
-              <h2
-                id="companies-heading"
-                className="font-display text-[24px] font-extrabold uppercase leading-none"
-              >
-                Companies
-              </h2>
-              <Alert>{listError}</Alert>
-              {companies.length === 0 && !listError && (
-                <p className="text-muted">No companies yet.</p>
-              )}
-              <ul className="flex flex-col gap-3">
-                {companies.map((c) => (
-                  <CompanyRow key={c.id} company={c} onChanged={load} />
-                ))}
-              </ul>
-            </section>
-          </>
-        )}
-      </div>
-    </Screen>
+    <div className="flex flex-col gap-8">
+      <CreateCompany onCreated={load} />
+      <section aria-labelledby="companies-heading" className="flex flex-col gap-3">
+        <h2
+          id="companies-heading"
+          className="font-display text-[24px] font-extrabold uppercase leading-none"
+        >
+          Companies
+        </h2>
+        <Alert>{listError}</Alert>
+        {companies.length === 0 && !listError && <p className="text-muted">No companies yet.</p>}
+        <ul className="flex flex-col gap-3">
+          {companies.map((c) => (
+            <CompanyRow key={c.id} company={c} onChanged={load} />
+          ))}
+        </ul>
+      </section>
+    </div>
   );
 }
 
@@ -191,62 +155,18 @@ function CreateCompany({ onCreated }: { onCreated: () => Promise<void> }) {
         <Alert>{error}</Alert>
         <PrimaryButton disabled={busy}>Create company</PrimaryButton>
       </form>
-      {created && <InviteLink created={created} />}
+      {created && (
+        <InviteLink
+          url={created.inviteUrl}
+          shareText={`You're invited to run ${created.company.name} on Site Diary. Open this link to join:`}
+        >
+          <p>
+            <strong className="font-semibold">{created.company.name}</strong> is ready. Send this
+            link to their Super Admin. It works for 7 days.
+          </p>
+        </InviteLink>
+      )}
     </section>
-  );
-}
-
-function InviteLink({ created }: { created: Created }) {
-  const linkRef = useRef<HTMLParagraphElement>(null);
-  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'manual'>('idle');
-
-  function selectLink() {
-    const el = linkRef.current;
-    const sel = window.getSelection();
-    if (!el || !sel) return;
-    const range = document.createRange();
-    range.selectNodeContents(el);
-    sel.removeAllRanges();
-    sel.addRange(range);
-  }
-
-  async function copy() {
-    try {
-      if (!navigator.clipboard) throw new Error('no clipboard');
-      await navigator.clipboard.writeText(created.inviteUrl);
-      setCopyState('copied');
-    } catch {
-      // No clipboard access: select the text so it can be copied by hand.
-      selectLink();
-      setCopyState('manual');
-    }
-  }
-
-  return (
-    <div className="flex flex-col gap-3 rounded-[var(--r)] border border-line bg-card px-4 py-4">
-      <p className="break-words">
-        <strong className="font-semibold">{created.company.name}</strong> is ready. Send this link
-        to their Super Admin. It works for 7 days.
-      </p>
-      <span className={labelClass}>Invite link</span>
-      <p
-        ref={linkRef}
-        data-testid="invite-link"
-        className="select-all break-all rounded-[calc(var(--r)*0.75)] border border-field-line bg-surface px-3 py-2.5 font-mono text-[13px]"
-      >
-        {created.inviteUrl}
-      </p>
-      <div className="flex flex-wrap items-center gap-3">
-        <SecondaryButton onClick={() => void copy()}>Copy link</SecondaryButton>
-        <span role="status" className="text-muted">
-          {copyState === 'copied'
-            ? 'Link copied.'
-            : copyState === 'manual'
-              ? 'Link selected. Copy it from your device menu.'
-              : ''}
-        </span>
-      </div>
-    </div>
   );
 }
 

@@ -50,7 +50,7 @@ describe('SignIn', () => {
     );
     renderSignIn();
     expect(await screen.findByText('Every site, every day, on record.')).toBeTruthy();
-    expect(screen.getByLabelText('Company workspace (optional)')).toBeTruthy();
+    expect(screen.queryByLabelText('Company workspace (optional)')).toBeNull();
     await userEvent.type(screen.getByLabelText('Email'), 'a@b.example');
     await userEvent.type(screen.getByLabelText('Password'), 'wrong-password');
     await userEvent.click(screen.getByRole('button', { name: 'Sign in' }));
@@ -67,5 +67,24 @@ describe('SignIn', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Send reset link' }));
     expect(await screen.findByText(RESET_SENT)).toBeTruthy();
     expect(RESET_SENT).toBe('If that email has an account, a reset link is on its way.');
+  });
+
+  it('the eye button shows and hides the password', async () => {
+    fetchMock.mockImplementation(() => Promise.resolve(json(401, {})));
+    renderSignIn();
+    const password = (await screen.findByLabelText('Password')) as HTMLInputElement;
+    expect(password.type).toBe('password');
+    await userEvent.click(screen.getByRole('button', { name: 'Show password' }));
+    expect(password.type).toBe('text');
+    await userEvent.click(screen.getByRole('button', { name: 'Hide password' }));
+    expect(password.type).toBe('password');
+  });
+
+  it('has no owner sign-up link and no theme buttons (those live in the app menu)', async () => {
+    fetchMock.mockImplementation(() => Promise.resolve(json(401, {})));
+    renderSignIn();
+    await screen.findByRole('button', { name: 'Sign in' });
+    expect(screen.queryByRole('link', { name: /Create owner account/ })).toBeNull();
+    expect(screen.queryByRole('group', { name: 'Theme' })).toBeNull();
   });
 });
