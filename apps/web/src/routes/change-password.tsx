@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { ApiError, api, errorMessage } from '../lib/api';
-import { fetchMe, landingFor, signOut } from '../lib/auth';
+import { enterApp, fetchMe, signOut } from '../lib/auth';
 import {
   Alert,
   Field,
@@ -65,7 +65,7 @@ function ChangePassword() {
     setBusy(true);
     try {
       await api('/api/me/password', { company: null, body: { currentPassword, newPassword } });
-      await navigate({ to: landingFor(await fetchMe()), replace: true });
+      await navigate({ to: enterApp(await fetchMe()), replace: true });
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
         await navigate({ to: '/', replace: true });

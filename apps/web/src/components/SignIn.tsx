@@ -1,10 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
 import { Link, useNavigate } from '@tanstack/react-router';
-import { authClient, authErrorMessage, fetchMe, landingFor } from '../lib/auth';
+import { authClient, authErrorMessage, enterApp, fetchMe } from '../lib/auth';
 import { errorMessage } from '../lib/api';
 import { ThemeSwitcher } from './ThemeSwitcher';
-import { Alert, Logo, linkClass, primaryButton } from './ui';
+import { Alert, Loading, Logo, linkClass, primaryButton } from './ui';
 
 const input =
   'w-full min-w-0 border border-field-line bg-card px-3 py-3 text-text outline-none focus:border-accent focus:shadow-[0_0_0_3px_color-mix(in_srgb,var(--accent)_20%,transparent)]';
@@ -18,6 +18,22 @@ export function SignIn() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [resetSent, setResetSent] = useState(false);
+  // Already signed in: skip the form and open the app. Any failure shows the form.
+  const [checking, setChecking] = useState(true);
+
+  useEffect(() => {
+    let live = true;
+    fetchMe()
+      .then((me) => {
+        if (live) void navigate({ to: enterApp(me), replace: true });
+      })
+      .catch(() => {
+        if (live) setChecking(false);
+      });
+    return () => {
+      live = false;
+    };
+  }, [navigate]);
 
   async function onSignIn(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -33,7 +49,7 @@ export function SignIn() {
         setError(authErrorMessage(authError));
         return;
       }
-      await navigate({ to: landingFor(await fetchMe()) });
+      await navigate({ to: enterApp(await fetchMe()) });
     } catch (err) {
       setError(errorMessage(err));
     } finally {
@@ -72,7 +88,9 @@ export function SignIn() {
       </h1>
       <p className="mb-8 mt-2.5 text-muted">Every site, every day, on record.</p>
 
-      {mode === 'sign-in' ? (
+      {checking ? (
+        <Loading />
+      ) : mode === 'sign-in' ? (
         <form onSubmit={onSignIn} className="flex flex-col gap-4">
           <div className="flex flex-col gap-1.5">
             <label htmlFor="workspace" className={label}>

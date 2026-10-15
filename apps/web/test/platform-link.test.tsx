@@ -70,12 +70,28 @@ describe('Platform admin link', () => {
     setActiveCompany(null);
   });
 
-  it('/companies keeps a platform admin with one membership on the picker, with the link', async () => {
+  it('/companies opens the only company for a platform admin too, with the link there', async () => {
     fetchMock.mockImplementation(respond(true));
     const router = renderAt('/companies');
+    await vi.waitFor(() => expect(router.state.location.pathname).toBe('/home'));
     expect(await screen.findByRole('link', { name: 'Platform admin' })).toBeTruthy();
     expect(screen.getByText('Mehta Infra')).toBeTruthy();
-    expect(router.state.location.pathname).toBe('/companies');
+  });
+
+  it('/home hides "Switch company" when there is only one company', async () => {
+    setActiveCompany(COMPANY_ID);
+    fetchMock.mockImplementation(respond(true));
+    renderAt('/home');
+    expect(await screen.findByRole('link', { name: 'Platform admin' })).toBeTruthy();
+    expect(screen.queryByRole('link', { name: 'Switch company' })).toBeNull();
+  });
+
+  it('opening the app while signed in skips the sign-in form', async () => {
+    fetchMock.mockImplementation(respond(false));
+    const router = renderAt('/');
+    await vi.waitFor(() => expect(router.state.location.pathname).toBe('/home'));
+    expect(await screen.findByText('Mehta Infra')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Sign in' })).toBeNull();
   });
 
   it('/home shows the link to a platform admin', async () => {

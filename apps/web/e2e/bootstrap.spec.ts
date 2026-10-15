@@ -70,6 +70,17 @@ test('platform admin → company → invite → super admin lands in home', asyn
   await expect(page).toHaveURL(/\/home$/);
   await expect(page.getByText('Mehta Infra')).toBeVisible();
   await expect(page.getByText('Super Admin')).toBeVisible();
+
+  // Opening the app while signed in goes straight to the company's main page.
+  await page.goto('/');
+  await expect(page).toHaveURL(/\/home$/);
+
+  // So does signing in again: with one company there is nothing to pick.
+  await page.getByRole('button', { name: 'Sign out' }).click();
+  await expect(page).toHaveURL(/\/$/);
+  await signInOnPage(page, 'anita@mehtainfra.example', 'anita-password-123');
+  await expect(page).toHaveURL(/\/home$/);
+  await expect(page.getByText('Mehta Infra')).toBeVisible();
 });
 
 test('invite link opened twice shows "This invitation has already been used."', async ({
