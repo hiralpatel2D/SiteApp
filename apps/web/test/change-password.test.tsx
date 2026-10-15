@@ -57,10 +57,19 @@ describe('landingFor', () => {
     expect(landingFor(me({ mustChangePassword: true }))).toBe('/change-password');
     expect(landingFor(me({ mustChangePassword: true, memberships: 1 }))).toBe('/change-password');
   });
+  it('anyone with exactly one active company goes straight to its main page', () => {
+    expect(landingFor(me({ memberships: 1 }))).toBe('/home');
+    expect(landingFor(me({ isPlatformAdmin: false, memberships: 1 }))).toBe('/home');
+  });
   it('platform admins without memberships go to /platform, everyone else to /companies', () => {
     expect(landingFor(me())).toBe('/platform');
-    expect(landingFor(me({ memberships: 1 }))).toBe('/companies');
+    expect(landingFor(me({ memberships: 2 }))).toBe('/companies');
     expect(landingFor(me({ isPlatformAdmin: false }))).toBe('/companies');
+  });
+  it('a single suspended company goes to the picker, which explains the suspension', () => {
+    const suspended = me({ memberships: 1 });
+    suspended.memberships[0]!.companyStatus = 'suspended';
+    expect(landingFor(suspended)).toBe('/companies');
   });
 });
 

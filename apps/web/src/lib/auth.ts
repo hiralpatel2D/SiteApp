@@ -31,9 +31,23 @@ export type Me = {
 };
 
 /** Where a signed-in user goes next: the forced password change comes first. */
-export function landingFor(me: Me): '/change-password' | '/platform' | '/companies' {
+export function landingFor(me: Me): '/change-password' | '/platform' | '/companies' | '/home' {
   if (me.user.mustChangePassword) return '/change-password';
+  if (onlyActiveCompany(me)) return '/home';
   return me.user.isPlatformAdmin && me.memberships.length === 0 ? '/platform' : '/companies';
+}
+
+/** The company id when the user belongs to exactly one, and it is active; else null. */
+export function onlyActiveCompany(me: Me): string | null {
+  const only = me.memberships.length === 1 ? me.memberships[0] : undefined;
+  return only && only.companyStatus === 'active' ? only.companyId : null;
+}
+
+/** `landingFor`, plus making the company active when the landing is its main page. */
+export function enterApp(me: Me): ReturnType<typeof landingFor> {
+  const to = landingFor(me);
+  if (to === '/home') setActiveCompany(onlyActiveCompany(me));
+  return to;
 }
 
 /** True for the API's 403 `password_change_required`. */

@@ -26,6 +26,7 @@ function Home() {
   const [ctx, setCtx] = useState<CompanyContext | null>(null);
   const [error, setError] = useState('');
   const [platformAdmin, setPlatformAdmin] = useState(false);
+  const [companyCount, setCompanyCount] = useState(0);
 
   useEffect(() => {
     if (!getActiveCompany()) {
@@ -33,9 +34,8 @@ function Home() {
       return;
     }
     let live = true;
-    // Only decides whether to show the Platform admin link; failures hide it.
-    // Decides whether to show the Platform admin link (failures hide it), and
-    // sends a user who must change their password to do that first.
+    // Decides which links to show (failures hide them), and sends a user who
+    // must change their password to do that first.
     fetchMe().then(
       (me) => {
         if (!live) return;
@@ -45,6 +45,7 @@ function Home() {
           return;
         }
         setPlatformAdmin(me.user.isPlatformAdmin);
+        setCompanyCount(me.memberships.length);
       },
       () => undefined,
     );
@@ -102,9 +103,11 @@ function Home() {
         </div>
       )}
       <nav className="mt-6 flex flex-wrap gap-x-6 gap-y-3">
-        <Link to="/companies" className={linkClass}>
-          Switch company
-        </Link>
+        {companyCount > 1 && (
+          <Link to="/companies" className={linkClass}>
+            Switch company
+          </Link>
+        )}
         {platformAdmin && (
           <Link to="/platform" className={linkClass}>
             Platform admin

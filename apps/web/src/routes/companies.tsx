@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, createFileRoute, useNavigate } from '@tanstack/react-router';
 import { ApiError, errorMessage } from '../lib/api';
-import { fetchMe, signOut, type Me, type Membership } from '../lib/auth';
+import { fetchMe, onlyActiveCompany, signOut, type Me, type Membership } from '../lib/auth';
 import { setActiveCompany } from '../lib/company';
 import { Alert, Loading, PageTitle, Screen, SecondaryButton, linkClass } from '../components/ui';
 
@@ -23,10 +23,11 @@ function Companies() {
           void navigate({ to: '/change-password', replace: true });
           return;
         }
-        const only = data.memberships.length === 1 ? data.memberships[0] : undefined;
-        // Platform admins stay on the picker so they can reach Platform admin.
-        if (only && only.companyStatus === 'active' && !data.user.isPlatformAdmin) {
-          setActiveCompany(only.companyId);
+        // One active company: nothing to pick, open its main page. Platform
+        // admins reach Platform admin from there.
+        const only = onlyActiveCompany(data);
+        if (only) {
+          setActiveCompany(only);
           void navigate({ to: '/home', replace: true });
           return;
         }

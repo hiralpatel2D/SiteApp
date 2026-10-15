@@ -37,10 +37,16 @@ describe('SignIn', () => {
   afterEach(() => vi.unstubAllGlobals());
 
   it('shows the catalogue message in an alert when sign-in fails', async () => {
-    fetchMock.mockResolvedValue(
-      json(429, {
-        error: { code: 'rate_limited', message: 'Too many attempts. Wait a minute and try again.' },
-      }),
+    // A fresh Response per call: the signed-in check on mount reads one too.
+    fetchMock.mockImplementation(() =>
+      Promise.resolve(
+        json(429, {
+          error: {
+            code: 'rate_limited',
+            message: 'Too many attempts. Wait a minute and try again.',
+          },
+        }),
+      ),
     );
     renderSignIn();
     expect(await screen.findByText('Every site, every day, on record.')).toBeTruthy();
@@ -54,7 +60,7 @@ describe('SignIn', () => {
   });
 
   it('forgot password always shows the same answer', async () => {
-    fetchMock.mockResolvedValue(json(200, { status: true }));
+    fetchMock.mockImplementation(() => Promise.resolve(json(200, { status: true })));
     renderSignIn();
     await userEvent.click(await screen.findByRole('button', { name: 'Forgot password?' }));
     await userEvent.type(screen.getByLabelText('Email'), 'nobody@b.example');
