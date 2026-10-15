@@ -4,6 +4,7 @@ import { Link, useNavigate, useRouterState } from '@tanstack/react-router';
 import { ApiError, api, errorMessage } from '../lib/api';
 import { fetchMe, isPasswordChangeRequired, signOut, type Me } from '../lib/auth';
 import { getActiveCompany, setActiveCompany } from '../lib/company';
+import { Icon } from './icons';
 import { ThemeSwitcher } from './ThemeSwitcher';
 import { Alert, Loading, Logo, PageTitle, labelClass } from './ui';
 
@@ -30,7 +31,8 @@ export function useCan(capability: string): boolean {
 }
 
 type Props = {
-  title: string;
+  /** Page heading; Home has its own (the project switcher). */
+  title?: string;
   /** Company pages need an active company; Platform admin does not. */
   company?: boolean;
   children: ReactNode;
@@ -121,12 +123,12 @@ export function AppShell({ title, company = true, children }: Props) {
           aria-expanded={open}
           aria-controls="app-menu"
           onClick={() => setOpen(true)}
-          className="grid size-11 shrink-0 cursor-pointer place-items-center rounded-[calc(var(--r)*0.75)] border border-field-line bg-card text-text"
+          className="-ml-2 grid size-11 shrink-0 cursor-pointer place-items-center rounded-full text-text hover:bg-surface"
         >
           <svg
             viewBox="0 0 24 24"
-            width="20"
-            height="20"
+            width="24"
+            height="24"
             fill="none"
             stroke="currentColor"
             strokeWidth="2"
@@ -136,9 +138,8 @@ export function AppShell({ title, company = true, children }: Props) {
             <path d="M4 7h16M4 12h16M4 17h16" />
           </svg>
         </button>
-        <Logo size="small" />
-        <span className="min-w-0 truncate font-display text-[20px] font-extrabold uppercase leading-none">
-          {shell?.ctx?.company.name ?? 'Site Diary'}
+        <span className="min-w-0 truncate font-display text-[22px] font-extrabold uppercase leading-none">
+          Site Diary
         </span>
       </header>
 
@@ -208,7 +209,7 @@ export function AppShell({ title, company = true, children }: Props) {
       </nav>
 
       <main className="mx-auto flex w-full max-w-[720px] flex-col gap-6 px-5 pb-10 pt-6 md:px-8 md:pt-10">
-        <PageTitle>{title}</PageTitle>
+        {title && <PageTitle>{title}</PageTitle>}
         <Alert>{error}</Alert>
         {!shell && !error && <Loading />}
         {shell && (
@@ -228,7 +229,7 @@ const item =
 
 function MenuLinks({ shell }: { shell: Shell }) {
   const { me, ctx } = shell;
-  const canSeeTeam = ctx?.capabilities.includes('users.view') ?? false;
+  const can = (cap: string) => ctx?.capabilities.includes(cap) ?? false;
   const otherCompanies = ctx ? me.memberships.length > 1 : me.memberships.length > 0;
   return (
     <div className="flex flex-col gap-1">
@@ -242,47 +243,34 @@ function MenuLinks({ shell }: { shell: Shell }) {
       )}
       {ctx && (
         <Link to="/home" className={item}>
-          <Icon d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z" />
+          <Icon name="home" />
           Home
         </Link>
       )}
-      {canSeeTeam && (
+      {can('projects.view') && (
+        <Link to="/projects" className={item}>
+          <Icon name="pin" />
+          Projects
+        </Link>
+      )}
+      {can('users.view') && (
         <Link to="/team" className={item}>
-          <Icon d="M16 19v-1a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v1M9 10a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM22 19v-1a4 4 0 0 0-3-3.9M16 4.1a3 3 0 0 1 0 5.8" />
+          <Icon name="users" />
           Team
         </Link>
       )}
       {me.user.isPlatformAdmin && (
         <Link to="/platform" className={item}>
-          <Icon d="M3 21h18M5 21V7l7-4 7 4v14M9 9h1M9 13h1M14 9h1M14 13h1M10 21v-4h4v4" />
+          <Icon name="building" />
           Platform admin
         </Link>
       )}
       {otherCompanies && (
         <Link to="/companies" className={item}>
-          <Icon d="M7 7h13l-3-3M17 17H4l3 3" />
+          <Icon name="swap" />
           {ctx ? 'Switch company' : 'Your companies'}
         </Link>
       )}
     </div>
-  );
-}
-
-function Icon({ d }: { d: string }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      width="20"
-      height="20"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.75"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-      className="shrink-0"
-    >
-      <path d={d} />
-    </svg>
   );
 }

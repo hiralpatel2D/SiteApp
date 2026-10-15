@@ -14,6 +14,7 @@ import { Route as ChangePasswordRouteImport } from './routes/change-password'
 import { Route as CompaniesRouteImport } from './routes/companies'
 import { Route as HomeRouteImport } from './routes/home'
 import { Route as PlatformRouteImport } from './routes/platform'
+import { Route as ProjectsRouteImport } from './routes/projects'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as SetupRouteImport } from './routes/setup'
 import { Route as TeamRouteImport } from './routes/team'
@@ -44,6 +45,11 @@ const PlatformRoute = PlatformRouteImport.update({
   path: '/platform',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ProjectsRoute = ProjectsRouteImport.update({
+  id: '/projects',
+  path: '/projects',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ResetPasswordRoute = ResetPasswordRouteImport.update({
   id: '/reset-password',
   path: '/reset-password',
@@ -71,6 +77,7 @@ export interface FileRoutesByFullPath {
   '/companies': typeof CompaniesRoute
   '/home': typeof HomeRoute
   '/platform': typeof PlatformRoute
+  '/projects': typeof ProjectsRoute
   '/reset-password': typeof ResetPasswordRoute
   '/setup': typeof SetupRoute
   '/team': typeof TeamRoute
@@ -82,6 +89,7 @@ export interface FileRoutesByTo {
   '/companies': typeof CompaniesRoute
   '/home': typeof HomeRoute
   '/platform': typeof PlatformRoute
+  '/projects': typeof ProjectsRoute
   '/reset-password': typeof ResetPasswordRoute
   '/setup': typeof SetupRoute
   '/team': typeof TeamRoute
@@ -94,6 +102,7 @@ export interface FileRoutesById {
   '/companies': typeof CompaniesRoute
   '/home': typeof HomeRoute
   '/platform': typeof PlatformRoute
+  '/projects': typeof ProjectsRoute
   '/reset-password': typeof ResetPasswordRoute
   '/setup': typeof SetupRoute
   '/team': typeof TeamRoute
@@ -107,6 +116,7 @@ export interface FileRouteTypes {
     | '/companies'
     | '/home'
     | '/platform'
+    | '/projects'
     | '/reset-password'
     | '/setup'
     | '/team'
@@ -118,6 +128,7 @@ export interface FileRouteTypes {
     | '/companies'
     | '/home'
     | '/platform'
+    | '/projects'
     | '/reset-password'
     | '/setup'
     | '/team'
@@ -129,6 +140,7 @@ export interface FileRouteTypes {
     | '/companies'
     | '/home'
     | '/platform'
+    | '/projects'
     | '/reset-password'
     | '/setup'
     | '/team'
@@ -141,6 +153,7 @@ export interface RootRouteChildren {
   CompaniesRoute: typeof CompaniesRoute
   HomeRoute: typeof HomeRoute
   PlatformRoute: typeof PlatformRoute
+  ProjectsRoute: typeof ProjectsRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
   SetupRoute: typeof SetupRoute
   TeamRoute: typeof TeamRoute
@@ -184,6 +197,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PlatformRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/projects': {
+      id: '/projects'
+      path: '/projects'
+      fullPath: '/projects'
+      preLoaderRoute: typeof ProjectsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/reset-password': {
       id: '/reset-password'
       path: '/reset-password'
@@ -221,6 +241,7 @@ const rootRouteChildren: RootRouteChildren = {
   CompaniesRoute: CompaniesRoute,
   HomeRoute: HomeRoute,
   PlatformRoute: PlatformRoute,
+  ProjectsRoute: ProjectsRoute,
   ResetPasswordRoute: ResetPasswordRoute,
   SetupRoute: SetupRoute,
   TeamRoute: TeamRoute,
