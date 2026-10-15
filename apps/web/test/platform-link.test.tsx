@@ -75,7 +75,7 @@ describe('Platform admin link', () => {
     const router = renderAt('/companies');
     await vi.waitFor(() => expect(router.state.location.pathname).toBe('/home'));
     expect(await screen.findByRole('link', { name: 'Platform admin' })).toBeTruthy();
-    expect(screen.getByText('Mehta Infra')).toBeTruthy();
+    expect(screen.getAllByText('Mehta Infra').length).toBeGreaterThan(0);
   });
 
   it('/home hides "Switch company" when there is only one company', async () => {
@@ -90,7 +90,7 @@ describe('Platform admin link', () => {
     fetchMock.mockImplementation(respond(false));
     const router = renderAt('/');
     await vi.waitFor(() => expect(router.state.location.pathname).toBe('/home'));
-    expect(await screen.findByText('Mehta Infra')).toBeTruthy();
+    expect((await screen.findAllByText('Mehta Infra')).length).toBeGreaterThan(0);
     expect(screen.queryByRole('button', { name: 'Sign in' })).toBeNull();
   });
 

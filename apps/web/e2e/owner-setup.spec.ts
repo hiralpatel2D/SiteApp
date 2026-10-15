@@ -8,11 +8,10 @@ test.beforeEach(async ({ context }) => {
   await context.setExtraHTTPHeaders({ 'x-client-ip': ip });
 });
 
-test('sign-in links to the owner setup page', async ({ page }) => {
+test('sign-in no longer links to the owner setup page', async ({ page }) => {
   await page.goto('/');
-  await page.getByRole('link', { name: 'App owner? Create owner account' }).click();
-  await expect(page).toHaveURL(/\/setup$/);
-  await expect(page.getByRole('heading', { name: 'Create owner account' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Sign in' })).toBeVisible();
+  await expect(page.getByRole('link', { name: /Create owner account/ })).toHaveCount(0);
 });
 
 test('owner setup refuses emails that are not the platform owner', async ({ page }) => {

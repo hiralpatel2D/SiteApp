@@ -1,9 +1,8 @@
 import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
-import { Link, useNavigate } from '@tanstack/react-router';
+import { useNavigate } from '@tanstack/react-router';
 import { authClient, authErrorMessage, enterApp, fetchMe } from '../lib/auth';
 import { errorMessage } from '../lib/api';
-import { ThemeSwitcher } from './ThemeSwitcher';
 import { Alert, Loading, Logo, linkClass, primaryButton } from './ui';
 
 const input =
@@ -18,6 +17,7 @@ export function SignIn() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [resetSent, setResetSent] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   // Already signed in: skip the form and open the app. Any failure shows the form.
   const [checking, setChecking] = useState(true);
 
@@ -93,25 +93,6 @@ export function SignIn() {
       ) : mode === 'sign-in' ? (
         <form onSubmit={onSignIn} className="flex flex-col gap-4">
           <div className="flex flex-col gap-1.5">
-            <label htmlFor="workspace" className={label}>
-              Company workspace (optional)
-            </label>
-            <div className="flex items-stretch">
-              <input
-                id="workspace"
-                name="workspace"
-                autoComplete="organization"
-                autoCapitalize="none"
-                spellCheck={false}
-                placeholder="your-company"
-                className={`${input} rounded-l-[calc(var(--r)*0.75)]`}
-              />
-              <span className="grid shrink-0 place-items-center rounded-r-[calc(var(--r)*0.75)] border border-l-0 border-field-line bg-card px-2.5 font-mono text-[11px] text-muted">
-                .sitediary.app
-              </span>
-            </div>
-          </div>
-          <div className="flex flex-col gap-1.5">
             <label htmlFor="email" className={label}>
               Email
             </label>
@@ -128,14 +109,39 @@ export function SignIn() {
             <label htmlFor="password" className={label}>
               Password
             </label>
-            <input
-              id="password"
-              name="password"
-              type="password"
-              required
-              autoComplete="current-password"
-              className={`${input} rounded-[calc(var(--r)*0.75)]`}
-            />
+            <div className="relative">
+              <input
+                id="password"
+                name="password"
+                type={showPassword ? 'text' : 'password'}
+                required
+                autoComplete="current-password"
+                className={`${input} rounded-[calc(var(--r)*0.75)] pr-12`}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((v) => !v)}
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
+                aria-pressed={showPassword}
+                className="absolute inset-y-0 right-0 grid w-12 cursor-pointer place-items-center text-muted hover:text-text"
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  width="20"
+                  height="20"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.75"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" />
+                  <circle cx="12" cy="12" r="3" />
+                  {showPassword && <path d="M4 4l16 16" />}
+                </svg>
+              </button>
+            </div>
           </div>
           <Alert>{error}</Alert>
           <button type="submit" disabled={busy} className={primaryButton}>
@@ -148,9 +154,6 @@ export function SignIn() {
           >
             Forgot password?
           </button>
-          <Link to="/setup" className={`${linkClass} self-start text-sm`}>
-            App owner? Create owner account
-          </Link>
         </form>
       ) : (
         <form onSubmit={onForgot} className="flex flex-col gap-4">
@@ -187,9 +190,8 @@ export function SignIn() {
       )}
 
       <footer className="mt-auto flex flex-col gap-4 pt-6">
-        <ThemeSwitcher />
         <p className="text-xs text-muted">
-          Each company gets its own workspace and its data is never shared with another company.
+          Each company's data is kept separate and never shared with another company.
         </p>
       </footer>
     </main>

@@ -68,8 +68,9 @@ test('platform admin → company → invite → super admin lands in home', asyn
   await page.getByRole('button', { name: 'Join' }).click();
 
   await expect(page).toHaveURL(/\/home$/);
-  await expect(page.getByText('Mehta Infra')).toBeVisible();
-  await expect(page.getByText('Super Admin')).toBeVisible();
+  const menu = page.getByRole('navigation', { name: 'Main menu' });
+  await expect(menu.getByText('Mehta Infra')).toBeVisible();
+  await expect(menu.getByText('Super Admin')).toBeVisible();
 
   // Opening the app while signed in goes straight to the company's main page.
   await page.goto('/');
@@ -80,7 +81,18 @@ test('platform admin → company → invite → super admin lands in home', asyn
   await expect(page).toHaveURL(/\/$/);
   await signInOnPage(page, 'anita@mehtainfra.example', 'anita-password-123');
   await expect(page).toHaveURL(/\/home$/);
-  await expect(page.getByText('Mehta Infra')).toBeVisible();
+
+  // The Super Admin invites a team member from the Team page.
+  await menu.getByRole('link', { name: 'Team' }).click();
+  await expect(page).toHaveURL(/\/team$/);
+  await expect(page.getByText('anita@mehtainfra.example')).toBeVisible();
+  await page.getByLabel('Their email').fill('ravi@mehtainfra.example');
+  await page.getByLabel('Role').selectOption({ label: 'Site Engineer' });
+  await page.getByRole('button', { name: 'Create invite' }).click();
+  await expect(page.getByTestId('invite-link')).toContainText('/invite/');
+  await expect(page.getByRole('link', { name: 'Share on WhatsApp' })).toBeVisible();
+  await expect(page.getByText(/ravi@mehtainfra\.example/).first()).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Waiting to join' })).toBeVisible();
 });
 
 test('invite link opened twice shows "This invitation has already been used."', async ({
@@ -117,12 +129,18 @@ test('360px: invite and platform pages have no horizontal scroll', async ({ page
   });
   const noScroll = () => page.evaluate(() => document.documentElement.scrollWidth);
   expect(await noScroll()).toBeLessThanOrEqual(360);
-  for (const name of ['Copy link', 'Create company', 'Sign out']) {
+  for (const name of ['Copy link', 'Create company']) {
     const btn = page.getByRole('button', { name, exact: true });
     expect(await btn.evaluate((b) => b.scrollWidth <= b.clientWidth)).toBe(true);
   }
 
-  await page.getByRole('button', { name: 'Sign out' }).click();
+  // On a phone the menu is a drawer: closed until the menu button opens it.
+  await expect(page.getByRole('button', { name: 'Sign out' })).toBeHidden();
+  await page.getByRole('button', { name: 'Open menu' }).click();
+  const signOut = page.getByRole('button', { name: 'Sign out' });
+  await expect(signOut).toBeVisible();
+  expect(await noScroll()).toBeLessThanOrEqual(360);
+  await signOut.click();
   await expect(page).toHaveURL(/\/$/);
   await page.goto(inviteUrl);
   await expect(page.getByText(/Join Desai Constructions/)).toBeVisible();
