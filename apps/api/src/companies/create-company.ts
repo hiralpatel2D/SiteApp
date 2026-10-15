@@ -1,4 +1,3 @@
-import { DrizzleQueryError } from 'drizzle-orm';
 import {
   SYSTEM_ROLES,
   defaultCapabilities,
@@ -7,7 +6,9 @@ import {
   type SystemRoleKey,
 } from '@sitediary/shared';
 import type { Db } from '../db/pools';
+import type { AppTx } from '../db/tenant';
 import { auditLog, companies, roleCapabilities, roles } from '../db/schema';
+import { isUniqueViolation } from '../db/errors';
 import { AppError } from '../http/errors';
 
 export type CreateCompanyInput = { name: string; slug: string };
@@ -15,28 +16,23 @@ export type CreateCompanyResult = { companyId: string; roleIds: Record<SystemRol
 
 const SLUG_UNIQUE = 'companies_slug_unique';
 
-function isSlugTaken(err: unknown): boolean {
-  const cause = err instanceof DrizzleQueryError ? err.cause : err;
-  if (typeof cause !== 'object' || cause === null) return false;
-  const e = cause as { code?: unknown; constraint?: unknown };
-  return e.code === '23505' && e.constraint === SLUG_UNIQUE;
-}
-
 /**
  * Creates a company with its nine system roles, their default capabilities and
  * an audit entry, in one owner transaction (owner connection bypasses RLS).
+ * Given an owner transaction instead of a Db it runs as a savepoint inside it,
+ * so the caller can add more work that commits or rolls back with the company.
+ * `actorId` is the platform admin recorded on the audit entry.
  */
 export async function createCompany(
-  ownerDb: Db,
+  ownerDb: Db | AppTx,
   input: CreateCompanyInput,
+  opts: { actorId?: string } = {},
 ): Promise<CreateCompanyResult> {
   const parsed = slugSchema.safeParse(input.slug);
   if (!parsed.success) {
-    throw new AppError(
-      400,
-      'invalid_slug',
-      parsed.error.issues[0]?.message ?? 'Workspace name is not valid.',
-    );
+    throw new AppError(400, 'validation_failed', 'Check the highlighted fields.', {
+      slug: parsed.error.issues[0]?.message ?? 'Workspace name is not valid.',
+    });
   }
   const slug = parsed.data;
   const companyId = newId();
@@ -72,11 +68,13 @@ export async function createCompany(
         action: 'company.created',
         entity: 'company',
         entityId: companyId,
+        userId: opts.actorId ?? null,
+        createdBy: opts.actorId ?? null,
         after: { name: input.name, slug },
       });
     });
   } catch (err) {
-    if (isSlugTaken(err)) {
+    if (isUniqueViolation(err, SLUG_UNIQUE)) {
       throw new AppError(409, 'slug_taken', 'That workspace name is already in use.');
     }
     throw err;

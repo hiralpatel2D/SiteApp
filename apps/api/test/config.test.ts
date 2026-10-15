@@ -5,6 +5,8 @@ const base = {
   DATABASE_URL: 'postgres://a',
   MIGRATION_DATABASE_URL: 'postgres://b',
   APP_DB_PASSWORD: 'secret',
+  BETTER_AUTH_SECRET: 'x'.repeat(32),
+  APP_BASE_URL: 'https://app.sitediary.test',
 };
 
 describe('loadConfig', () => {
@@ -20,4 +22,40 @@ describe('loadConfig', () => {
       nodeEnv: 'development',
       appDbPassword: 'secret',
     }));
+
+  it('requires BETTER_AUTH_SECRET', () => {
+    expect(() => loadConfig({ ...base, BETTER_AUTH_SECRET: undefined })).toThrow(
+      'BETTER_AUTH_SECRET',
+    );
+  });
+  it('rejects a BETTER_AUTH_SECRET shorter than 32 characters', () =>
+    expect(() => loadConfig({ ...base, BETTER_AUTH_SECRET: 'x'.repeat(31) })).toThrow(
+      'BETTER_AUTH_SECRET',
+    ));
+  it('exposes the auth secret', () =>
+    expect(loadConfig(base).betterAuthSecret).toBe('x'.repeat(32)));
+
+  it('requires APP_BASE_URL', () => {
+    expect(() => loadConfig({ ...base, APP_BASE_URL: undefined })).toThrow('APP_BASE_URL');
+  });
+  it('rejects a relative APP_BASE_URL', () =>
+    expect(() => loadConfig({ ...base, APP_BASE_URL: '/app' })).toThrow('APP_BASE_URL'));
+  it('rejects a non-http APP_BASE_URL', () =>
+    expect(() => loadConfig({ ...base, APP_BASE_URL: 'ftp://x.test' })).toThrow('APP_BASE_URL'));
+  it('rejects an APP_BASE_URL with a path', () =>
+    expect(() => loadConfig({ ...base, APP_BASE_URL: 'https://x.test/app' })).toThrow(
+      'APP_BASE_URL',
+    ));
+  it('strips a trailing slash from APP_BASE_URL', () =>
+    expect(loadConfig({ ...base, APP_BASE_URL: 'https://x.test:8443/' }).appBaseUrl).toBe(
+      'https://x.test:8443',
+    ));
+
+  it('defaults PLATFORM_ADMIN_EMAILS to an empty list', () =>
+    expect(loadConfig(base).platformAdminEmails).toEqual([]));
+  it('splits, trims and lowercases PLATFORM_ADMIN_EMAILS', () =>
+    expect(
+      loadConfig({ ...base, PLATFORM_ADMIN_EMAILS: ' Owner@SiteDiary.test , ,b@x.test ' })
+        .platformAdminEmails,
+    ).toEqual(['owner@sitediary.test', 'b@x.test']));
 });

@@ -1,8 +1,20 @@
+import { existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { defineConfig, devices } from '@playwright/test';
 
 // Locally, point PW_CHROMIUM at a preinstalled Chromium binary. CI installs
 // browsers with `playwright install` and leaves it unset.
 const executablePath = process.env.PW_CHROMIUM || undefined;
+
+// The e2e suite runs the real API against the test database. Locally the
+// database settings come from apps/api/.env.test (run `scripts/test-db.sh start`
+// first); in CI they are in the job's environment. loadEnvFile never overrides
+// variables that are already set.
+const envFile = fileURLToPath(new URL('../api/.env.test', import.meta.url));
+if (existsSync(envFile)) process.loadEnvFile(envFile);
+
+const WEB_URL = 'http://localhost:4173';
+const API_PORT = '3000';
 
 export default defineConfig({
   testDir: 'e2e',
@@ -10,8 +22,9 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? 'github' : 'list',
+  globalSetup: './e2e/global-setup.ts',
   use: {
-    baseURL: 'http://localhost:4173',
+    baseURL: WEB_URL,
     trace: 'on-first-retry',
   },
   projects: [
@@ -20,10 +33,28 @@ export default defineConfig({
       use: { ...devices['Desktop Chrome'], launchOptions: { executablePath } },
     },
   ],
-  webServer: {
-    command: 'pnpm build && pnpm preview --port 4173 --strictPort',
-    url: 'http://localhost:4173',
-    reuseExistingServer: !process.env.CI,
-    timeout: 120_000,
-  },
+  webServer: [
+    {
+      // Migrate, then start the API. The web preview proxies /api here.
+      command: 'pnpm --filter api db:migrate && pnpm --filter api start',
+      url: `http://localhost:${API_PORT}/api/health`,
+      reuseExistingServer: !process.env.CI,
+      timeout: 120_000,
+      env: {
+        NODE_ENV: 'test',
+        PORT: API_PORT,
+        APP_BASE_URL: WEB_URL,
+        PLATFORM_ADMIN_EMAILS: 'owner@sitediary.test',
+        BETTER_AUTH_SECRET:
+          process.env.BETTER_AUTH_SECRET || 'test-only-better-auth-secret-0123456789abcdef',
+      },
+    },
+    {
+      command: 'pnpm build && pnpm preview --port 4173 --strictPort',
+      url: WEB_URL,
+      reuseExistingServer: !process.env.CI,
+      timeout: 120_000,
+      env: { API_URL: `http://localhost:${API_PORT}` },
+    },
+  ],
 });

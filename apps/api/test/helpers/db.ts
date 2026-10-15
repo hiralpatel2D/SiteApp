@@ -12,8 +12,10 @@ import { companies, projects } from '../../src/db/schema';
 const envFile = fileURLToPath(new URL('../../.env.test', import.meta.url));
 if (existsSync(envFile)) process.loadEnvFile(envFile);
 
-const cfg = loadConfig({ ...process.env, NODE_ENV: 'test' });
-const pools = createPools(cfg);
+/** Config for tests (NODE_ENV forced to `test`). */
+export const cfg = loadConfig({ ...process.env, NODE_ENV: 'test' });
+/** All pools; tests hand these to `createApp`. */
+export const pools = createPools(cfg);
 
 /** Owner (BYPASSRLS) pool: seeding and cleanup only. */
 export const owner = pools.owner;
@@ -21,7 +23,21 @@ export const owner = pools.owner;
 export const app = pools.app;
 export const ownerDb = pools.ownerDb;
 
-const TENANT_TABLES = ['audit_log', 'role_capabilities', 'roles', 'projects', 'companies'];
+const TENANT_TABLES = [
+  'audit_log',
+  'invitations',
+  'project_assignments',
+  'memberships',
+  'role_capabilities',
+  'roles',
+  'projects',
+  'companies',
+  // Global identity tables.
+  'verifications',
+  'accounts',
+  'sessions',
+  'users',
+];
 
 export async function truncateAll(): Promise<void> {
   await owner.query(`truncate table ${TENANT_TABLES.join(', ')} cascade`);

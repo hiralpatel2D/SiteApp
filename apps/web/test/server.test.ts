@@ -37,6 +37,7 @@ beforeAll(async () => {
       host: c.req.header('host'),
     }),
   );
+  api.get('/api/headers', (c) => c.json(Object.fromEntries(c.req.raw.headers)));
   api.get('/api/teapot', (c) => c.json({ error: 'nope' }, 418));
   fakeApi = await new Promise<Server>((resolve) => {
     const s = serve({ fetch: api.fetch, port: 0, hostname: '127.0.0.1' }, () =>
@@ -114,6 +115,106 @@ describe('web server', () => {
     expect(j.body).toEqual({ hello: 'world' });
     expect(j.custom).toBe('yes');
     expect(j.host).not.toBe('public.example');
+  });
+
+  it('sets forwarding headers and identity encoding upstream', async () => {
+    const r = await web.request('/api/headers', {
+      headers: { 'accept-encoding': 'gzip', 'x-forwarded-for': '203.0.113.9' },
+    });
+    const h = (await r.json()) as Record<string, string>;
+    expect(h['x-forwarded-for']).toBeTruthy();
+    expect(h['x-forwarded-for']).toContain('203.0.113.9');
+    expect(h['accept-encoding']).toBe('identity');
+    expect(h['x-forwarded-proto']).toBe('http');
+  });
+
+  it('appends the client socket address on a real connection', async () => {
+    const real = await new Promise<Server>((resolve) => {
+      const s = serve({ fetch: web.fetch, port: 0, hostname: '127.0.0.1' }, () =>
+        resolve(s as Server),
+      );
+    });
+    try {
+      const port = (real.address() as AddressInfo).port;
+      const r = await fetch(`http://127.0.0.1:${port}/api/headers`);
+      const h = (await r.json()) as Record<string, string>;
+      expect(h['x-forwarded-for']).toMatch(/127\.0\.0\.1$/);
+    } finally {
+      await new Promise((res) => real.close(res));
+    }
+  });
+
+  it('sets x-client-ip to the right-most x-forwarded-for entry and drops a client-sent one', async () => {
+    const r = await web.request('/api/headers', {
+      headers: {
+        'x-forwarded-for': '198.51.100.7, 203.0.113.9',
+        'x-client-ip': '192.0.2.66',
+      },
+    });
+    const h = (await r.json()) as Record<string, string>;
+    expect(h['x-client-ip']).toBe('203.0.113.9');
+  });
+
+  it('prefers x-real-ip (set by the Railway edge) over x-forwarded-for and a client-sent x-client-ip', async () => {
+    const r = await web.request('/api/headers', {
+      headers: {
+        'x-real-ip': '203.0.113.50',
+        'x-forwarded-for': '198.51.100.7, 203.0.113.9',
+        'x-client-ip': '192.0.2.66',
+      },
+    });
+    const h = (await r.json()) as Record<string, string>;
+    expect(h['x-client-ip']).toBe('203.0.113.50');
+  });
+
+  it('accepts an IPv6 x-real-ip', async () => {
+    const r = await web.request('/api/headers', {
+      headers: { 'x-real-ip': ' 2001:db8::1 ', 'x-forwarded-for': '203.0.113.9' },
+    });
+    const h = (await r.json()) as Record<string, string>;
+    expect(h['x-client-ip']).toBe('2001:db8::1');
+  });
+
+  it('ignores an invalid x-real-ip and falls back to the right-most x-forwarded-for entry', async () => {
+    const r = await web.request('/api/headers', {
+      headers: {
+        'x-real-ip': 'not-an-ip',
+        'x-forwarded-for': '198.51.100.7, 203.0.113.9',
+        'x-client-ip': '192.0.2.66',
+      },
+    });
+    const h = (await r.json()) as Record<string, string>;
+    expect(h['x-client-ip']).toBe('203.0.113.9');
+  });
+
+  it('drops a client-sent x-client-ip when there is no forwarding information', async () => {
+    const r = await web.request('/api/headers', { headers: { 'x-client-ip': '192.0.2.66' } });
+    const h = (await r.json()) as Record<string, string>;
+    expect(h['x-client-ip']).toBeUndefined();
+  });
+
+  it('falls back to the socket address for x-client-ip', async () => {
+    const real = await new Promise<Server>((resolve) => {
+      const s = serve({ fetch: web.fetch, port: 0, hostname: '127.0.0.1' }, () =>
+        resolve(s as Server),
+      );
+    });
+    try {
+      const port = (real.address() as AddressInfo).port;
+      const r = await fetch(`http://127.0.0.1:${port}/api/headers`, {
+        headers: { 'x-client-ip': '192.0.2.66' },
+      });
+      const h = (await r.json()) as Record<string, string>;
+      expect(h['x-client-ip']).toMatch(/^(::ffff:)?127\.0\.0\.1$/);
+    } finally {
+      await new Promise((res) => real.close(res));
+    }
+  });
+
+  it('keeps an incoming https x-forwarded-proto', async () => {
+    const r = await web.request('/api/headers', { headers: { 'x-forwarded-proto': 'https' } });
+    const h = (await r.json()) as Record<string, string>;
+    expect(h['x-forwarded-proto']).toBe('https');
   });
 
   it('returns upstream status codes', async () => {

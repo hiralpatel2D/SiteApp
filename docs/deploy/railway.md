@@ -1,46 +1,84 @@
-# Putting Site Diary on Railway
+# Site Diary on Railway
 
-You do this once. It takes about 20 minutes. You need a Railway account and access to the `hiralpatel2D/SiteApp` repository on GitHub.
+**Current setup (production):** Railway project **blissful-spirit** · public address **https://web-production-a648e.up.railway.app**
 
-## What you are building
+Railway has retired "config as code" files (`railway.json`), so all settings below are entered on each service in the Railway dashboard, under **Settings**. Use this page to check the setup or to rebuild it from scratch.
 
-- A **Postgres** database (stores everything).
-- An **api** service (the server brain, private, not on the internet).
-- A **web** service (the app people open in their browser; it passes requests to `api`).
+## What runs where
 
-## Steps
+| Service    | Public?               | What it does                                                             |
+| ---------- | --------------------- | ------------------------------------------------------------------------ |
+| `Postgres` | No                    | The database                                                             |
+| `api`      | No (private network)  | The server. It sets up and updates the tables every time it starts       |
+| `web`      | Yes (has the domain)  | The app people open. It passes `/api/...` requests to `api` privately    |
 
-1. Sign in to Railway and click **New Project**, then **Empty Project**. (Do not pick "Deploy from GitHub repo" here; you add the services yourself below so there are no stray extras.)
-2. In the project, click **New**, then **Database**, then **Add PostgreSQL**. Wait for it to turn green. Keep its name as `Postgres`, because the variables below refer to it.
-3. Click **New**, then **GitHub Repo**, and pick `hiralpatel2D/SiteApp`. Do this twice, so you have two services from this repo.
-4. Rename them so they are easy to tell apart (click the service, **Settings**, **Service Name**): call one `api` and the other `web`. The names must be exactly `api` and `web`, because step 7 refers to them.
-5. For each service open **Settings** and set:
-   - **Root Directory**: `/` (leave it as the repository root).
-   - **Config as Code** (Railway calls it "Config File Path"): `/apps/api/railway.json` for `api`, and `/apps/web/railway.json` for `web`.
-6. Open the `api` service, go to **Variables**, and add these four. Type them exactly as shown, including the `${{ ... }}` parts: Railway fills those in by itself, and it fills in the right values again in the staging copy, so you never paste a database address.
-   - `PORT`: `3001`
-   - `APP_DB_PASSWORD`: a long random password you invent. Use letters and digits only, 32 or more characters (for example `k8Jd2mQ7...`). Do not use symbols such as `@ / : # %`, because the password goes inside a web address and symbols break it. The first deploy creates the limited `app_user` account with this password.
-   - `MIGRATION_DATABASE_URL`: `${{Postgres.DATABASE_URL}}` (the address used to set up and update the tables, as Railway's `postgres` superuser).
-   - `DATABASE_URL`: `postgresql://app_user:${{APP_DB_PASSWORD}}@${{Postgres.PGHOST}}:${{Postgres.PGPORT}}/${{Postgres.PGDATABASE}}` (the address the running app uses, with the limited `app_user` account).
-7. Open the `web` service, go to **Variables**, and add:
-   - `API_INTERNAL_URL`: tells the website where the `api` lives inside Railway. Enter exactly: `http://${{api.RAILWAY_PRIVATE_DOMAIN}}:${{api.PORT}}`
-8. Create the staging copy: at the top of the project click the environment name (usually **production**), choose **New Environment**, name it `staging`, and duplicate from production. Then open `api`, **Variables**, inside `staging` and change only `APP_DB_PASSWORD` to a different password. Everything else follows automatically.
-9. Deploy: open each service and click **Deploy** (or push a change to the repository). Deploy `api` first, wait until it shows **Active**, then `web`. Do the same in `staging`.
-10. Open the `web` service, **Settings**, **Networking**, and click **Generate Domain**. Do this for `web` only. Do not give `api` a public domain; it should stay private.
+All three must keep these exact names, because the variables below refer to them.
 
-## Check that it worked
+## Before merging or deploying Plan 2 (do this first)
 
-- Open the `web` address in your browser. You should see the Site Diary sign-in screen.
-- Add `/api/health` to the end of that address. You should see `{"status":"ok","db":"up"}`.
+> **Important.** From Plan 2 onwards the `api` service **will not start** unless three new variables are set. Railway deploys `main` automatically, so set them **before** the Plan 2 changes are merged. If you merge first, the new `api` deployment keeps crashing (Railway keeps the old version running, but the deploy shows red until you add them).
 
-If the health page shows an error, open the `api` service, then **Deployments**, then **View Logs**, and send the last few lines to your developer.
+1. In Railway, make sure the environment at the top says **production**.
+2. Open the `api` service, then **Variables**.
+3. Add these three (the **Variables** table below explains each one):
+   - `BETTER_AUTH_SECRET`: a new random secret, letters and digits only, 48 characters.
+   - `APP_BASE_URL`: `https://web-production-a648e.up.railway.app` (the `web` address, no `/` at the end).
+   - `PLATFORM_ADMIN_EMAILS`: your own email address.
+4. Click **Deploy** to apply the changes. The current (Plan 1) version keeps running; it simply ignores the new variables.
+5. Only now merge the Plan 2 changes into `main`. When the new deploy finishes, run the checks in **Check that it works**.
 
-## The variables in one place
+## Service settings
 
-| Variable                 | Service | What it is                                                           |
-| ------------------------ | ------- | -------------------------------------------------------------------- |
-| `PORT`                   | api     | `3001`; the `web` service uses it to find `api`                      |
-| `MIGRATION_DATABASE_URL` | api     | `${{Postgres.DATABASE_URL}}`; used only to set up the tables         |
-| `DATABASE_URL`           | api     | Same database as `app_user`, built from the Postgres variables       |
-| `APP_DB_PASSWORD`        | api     | The password given to `app_user`; the URL picks it up automatically |
-| `API_INTERNAL_URL`       | web     | Private address of `api`: `http://${{api.RAILWAY_PRIVATE_DOMAIN}}:${{api.PORT}}` |
+Both services use the GitHub repo `hiralpatel2D/SiteApp`, branch `main`, root directory `/`, builder **Railpack**, and restart policy **On failure** (5 retries).
+
+| Setting                | `api`                                                    | `web`                                                    |
+| ---------------------- | -------------------------------------------------------- | -------------------------------------------------------- |
+| Build command          | `pnpm install --frozen-lockfile`                         | `pnpm install --frozen-lockfile && pnpm --filter web build` |
+| Start command          | `pnpm --filter api db:migrate && pnpm --filter api start` | `node apps/web/server.mjs`                               |
+| Healthcheck path       | `/api/health`                                            | `/`                                                      |
+| Healthcheck timeout    | 120 seconds                                              | 120 seconds                                              |
+| Public domain          | **None** (keep it private)                               | Generate one                                             |
+
+## Variables
+
+**`api` service**
+
+| Variable                 | Value                                                                                                 |
+| ------------------------ | ----------------------------------------------------------------------------------------------------- |
+| `PORT`                   | `3001`                                                                                                |
+| `NODE_ENV`               | `production`                                                                                          |
+| `APP_DB_PASSWORD`        | Its own long random password: letters and digits only, 40 characters. **Never** `${{Postgres.PGPASSWORD}}`, because the app's limited account must not share the master password. |
+| `MIGRATION_DATABASE_URL` | `${{Postgres.DATABASE_URL}}`                                                                          |
+| `DATABASE_URL`           | `postgresql://app_user:${{APP_DB_PASSWORD}}@${{Postgres.PGHOST}}:${{Postgres.PGPORT}}/${{Postgres.PGDATABASE}}` |
+| `BETTER_AUTH_SECRET`     | Its own long random secret: letters and digits only, 48 characters. It protects sign-in sessions. Use a different one in each environment, and never share it. |
+| `APP_BASE_URL`           | The `web` public address, starting with `https://` and with no `/` at the end, e.g. `https://web-production-a648e.up.railway.app`. Invite and password-reset links use it. |
+| `PLATFORM_ADMIN_EMAILS`  | The owner's email address. Only this email can create an account without an invitation, and it can create companies. To allow more than one, separate them with commas. |
+
+**`web` service**
+
+| Variable           | Value                                                 |
+| ------------------ | ----------------------------------------------------- |
+| `API_INTERNAL_URL` | `http://${{api.RAILWAY_PRIVATE_DOMAIN}}:${{api.PORT}}` |
+
+Type the `${{ ... }}` parts exactly. Railway fills them in itself, and in each environment it uses that environment's own database.
+
+## Staging (a test copy)
+
+A duplicated environment copies production's variables. Some of them **must** be changed in staging, or staging will block every sign-in and its emails will link to production.
+
+1. At the top of the project, click the environment name (**production**), then **New Environment**, then **Duplicate Environment**. Pick **production** and name it `staging`.
+2. Railway shows the copied services as pending changes. Review them and click **Deploy**.
+3. In staging, open `web`, then **Settings**, then **Networking**, and click **Generate Domain**. Do this for `web` only. Copy the new address (it starts with `https://`).
+4. In staging, open `api`, then **Variables**, and change these:
+   - `APP_DB_PASSWORD`: a **different** random password (letters and digits only, 40 characters).
+   - `BETTER_AUTH_SECRET`: a **different** random secret (letters and digits only, 48 characters). Never reuse production's.
+   - `APP_BASE_URL`: the **staging** `web` address from step 3, with no `/` at the end. (If it still shows the production address, staging blocks every form with "Request blocked.")
+   - `PLATFORM_ADMIN_EMAILS`: can stay the same as production.
+5. Click **Deploy** to apply the changes, then run the checks below on the staging address.
+
+## Check that it works
+
+- Open the `web` address. You should see the Site Diary sign-in screen.
+- Add `/api/health` to the end of the address. You should see `{"status":"ok","db":"up"}`.
+
+If the health page shows an error, open `api`, then **Deployments**, then **View Logs**, and share the last lines.

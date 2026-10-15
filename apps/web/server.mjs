@@ -6,6 +6,8 @@ import { dirname, extname, join, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Hono } from 'hono';
 import { serve } from '@hono/node-server';
+import { getConnInfo } from '@hono/node-server/conninfo';
+import { isIP } from 'node:net';
 
 const TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -64,8 +66,42 @@ export function createWebServer({ distDir, apiUrl }) {
     const target = `${upstream}${incoming.pathname}${incoming.search}`;
     const headers = new Headers();
     for (const [k, v] of c.req.raw.headers) {
-      if (!HOP_BY_HOP.has(k.toLowerCase())) headers.set(k, v);
+      const key = k.toLowerCase();
+      // x-client-ip is ours to set: never trust a client-sent value.
+      if (!HOP_BY_HOP.has(key) && key !== 'x-client-ip') headers.set(k, v);
     }
+    // No socket info when called via app.request() (tests); fall back to the prior header only.
+    let clientAddr;
+    try {
+      clientAddr = getConnInfo(c).remote.address;
+    } catch {
+      clientAddr = undefined;
+    }
+    const priorFor = c.req.header('x-forwarded-for');
+    const forwardedFor = [priorFor, clientAddr].filter(Boolean).join(', ');
+    if (forwardedFor) headers.set('x-forwarded-for', forwardedFor);
+    // The client IP the API trusts (auth and invite rate limiting, session
+    // records). Railway's edge documents X-Real-IP as the client's remote IP, so
+    // prefer it when it holds a valid address. Otherwise fall back to the
+    // RIGHT-most x-forwarded-for entry (anything to its left is
+    // client-controlled), then to the socket peer.
+    const realIp = c.req.header('x-real-ip')?.trim();
+    const clientIp =
+      (realIp && isIP(realIp) ? realIp : undefined) ??
+      priorFor
+        ?.split(',')
+        .map((p) => p.trim())
+        .filter(Boolean)
+        .at(-1) ??
+      clientAddr;
+    if (clientIp) headers.set('x-client-ip', clientIp);
+    const proto =
+      c.req.header('x-forwarded-proto')?.split(',')[0]?.trim().toLowerCase() === 'https'
+        ? 'https'
+        : incoming.protocol.replace(':', '');
+    headers.set('x-forwarded-proto', proto);
+    // Upstream bodies must be plain: fetch() would decode them and we drop the encoding headers.
+    headers.set('accept-encoding', 'identity');
     const method = c.req.method;
     const hasBody = method !== 'GET' && method !== 'HEAD';
     try {

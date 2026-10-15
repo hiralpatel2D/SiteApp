@@ -50,8 +50,8 @@ describe('createCompany', () => {
   it('invalid slug is a 400', async () => {
     await expect(createCompany(ownerDb, { name: 'A', slug: '!!' })).rejects.toMatchObject({
       status: 400,
-      code: 'invalid_slug',
-      message: 'Workspace name must be 3–40 letters, numbers or hyphens.',
+      code: 'validation_failed',
+      details: { slug: 'Workspace name must be 3–40 letters, numbers or hyphens.' },
     });
   });
 });

@@ -26,6 +26,9 @@ jobs:
       MIGRATION_DATABASE_URL: postgres://postgres:postgres@localhost:5432/sitediary_test
       DATABASE_URL: postgres://app_user:ci_app_password@localhost:5432/sitediary_test
       APP_DB_PASSWORD: ci_app_password
+      BETTER_AUTH_SECRET: ci-only-better-auth-secret-0123456789abcdef
+      APP_BASE_URL: http://localhost:5173
+      PLATFORM_ADMIN_EMAILS: owner@sitediary.test
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -40,6 +43,10 @@ jobs:
       - run: pnpm test
       - run: pnpm build
       - run: pnpm --filter web exec playwright install --with-deps chromium
+      # Starts the API (it migrates the test database first) and the web preview,
+      # which proxies /api to it. The database settings come from the job env above.
       - run: pnpm --filter web exec playwright test
         env:
           CI: true
+          APP_BASE_URL: http://localhost:4173
+          API_URL: http://localhost:3000

@@ -1,7 +1,9 @@
+import type { Server } from 'node:http';
 import { serve } from '@hono/node-server';
 import { loadConfig } from './config';
 import { createApp } from './app';
 import { createPools } from './db/pools';
+import { consoleEmailSender } from './email/email';
 
 let config;
 try {
@@ -23,7 +25,31 @@ const checkDb = async (): Promise<boolean> => {
   }
 };
 
-const app = createApp({ checkDb });
-serve({ fetch: app.fetch, port: config.port }, (info) => {
+const app = createApp({ checkDb, pools, config, email: consoleEmailSender });
+const server = serve({ fetch: app.fetch, port: config.port }, (info) => {
   console.log(`API listening on port ${info.port}`);
+}) as Server;
+
+server.on('error', (err: NodeJS.ErrnoException) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(`Port ${config.port} is already in use.`);
+  } else {
+    console.error(err);
+  }
+  process.exit(1);
 });
+
+let shuttingDown = false;
+const shutdown = (): void => {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  server.close(() => {
+    Promise.all([pools.owner.end(), pools.app.end()])
+      .catch((err: unknown) => console.error(err))
+      .finally(() => process.exit(0));
+  });
+  // Drop idle keep-alive connections so close() can complete promptly.
+  server.closeIdleConnections?.();
+};
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);

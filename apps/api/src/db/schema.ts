@@ -10,6 +10,7 @@ import {
   text,
   timestamp,
   unique,
+  uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
 import { newId } from '@sitediary/shared';
@@ -57,7 +58,12 @@ export const projects = pgTable(
     location: text('location'),
     status: text('status').notNull().default('active'),
   },
-  (t) => [unique('projects_company_id_code_unique').on(t.companyId, t.code)],
+  (t) => [
+    check('projects_status_check', sql`${t.status} in ('active', 'archived')`),
+    unique('projects_company_id_code_unique').on(t.companyId, t.code),
+    // Target for composite FKs (project_assignments) pinning same-company references.
+    unique('projects_company_id_id_unique').on(t.companyId, t.id),
+  ],
 );
 
 export const roles = pgTable(
@@ -71,7 +77,9 @@ export const roles = pgTable(
     isSystem: boolean('is_system').notNull().default(false),
   },
   (t) => [
-    unique('roles_company_id_name_unique').on(t.companyId, t.name),
+    // Role names are unique per company ignoring case ("Safety Officer" vs
+    // "safety officer"); replaces the exact-match roles_company_id_name_unique.
+    uniqueIndex('roles_company_id_lower_name_unique').on(t.companyId, sql`lower(${t.name})`),
     // Target for the composite FK below, so a capability can only point at a
     // role of the same company.
     unique('roles_company_id_id_unique').on(t.companyId, t.id),
@@ -111,4 +119,156 @@ export const auditLog = pgTable(
     after: jsonb('after'),
   },
   (t) => [index('audit_log_company_id_created_at_idx').on(t.companyId, t.createdAt)],
+);
+
+// ---------------------------------------------------------------------------
+// Identity. users/sessions/accounts/verifications are global (not company
+// data, no RLS) and are used by Better Auth through its Drizzle adapter, so
+// their TS property names must match Better Auth 1.7's core schema field names
+// (@better-auth/core db/get-tables): user{name,email,emailVerified,image},
+// session{expiresAt,token,ipAddress,userAgent,userId},
+// account{accountId,providerId,userId,accessToken,refreshToken,idToken,
+// accessTokenExpiresAt,refreshTokenExpiresAt,scope,password},
+// verification{identifier,value,expiresAt}; createdAt/updatedAt come from
+// `common`.
+// ---------------------------------------------------------------------------
+
+export const users = pgTable(
+  'users',
+  {
+    ...common,
+    name: text('name').notNull(),
+    email: text('email').notNull().unique(),
+    emailVerified: boolean('email_verified').notNull().default(false),
+    image: text('image'),
+    isPlatformAdmin: boolean('is_platform_admin').notNull().default(false),
+  },
+  (t) => [check('users_email_lowercase_check', sql`${t.email} = lower(${t.email})`)],
+);
+
+export const sessions = pgTable(
+  'sessions',
+  {
+    ...common,
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    token: text('token').notNull().unique(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    ipAddress: text('ip_address'),
+    userAgent: text('user_agent'),
+  },
+  (t) => [index('sessions_user_id_idx').on(t.userId)],
+);
+
+export const accounts = pgTable(
+  'accounts',
+  {
+    ...common,
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    accountId: text('account_id').notNull(),
+    providerId: text('provider_id').notNull(),
+    password: text('password'),
+    accessToken: text('access_token'),
+    refreshToken: text('refresh_token'),
+    idToken: text('id_token'),
+    accessTokenExpiresAt: timestamp('access_token_expires_at', { withTimezone: true }),
+    refreshTokenExpiresAt: timestamp('refresh_token_expires_at', { withTimezone: true }),
+    scope: text('scope'),
+  },
+  (t) => [index('accounts_user_id_idx').on(t.userId)],
+);
+
+export const verifications = pgTable(
+  'verifications',
+  {
+    ...common,
+    identifier: text('identifier').notNull(),
+    value: text('value').notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  },
+  (t) => [index('verifications_identifier_idx').on(t.identifier)],
+);
+
+/** A user's membership of one company, with exactly one role there. */
+export const memberships = pgTable(
+  'memberships',
+  {
+    ...common,
+    companyId: companyId(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id),
+    roleId: uuid('role_id').notNull(),
+    status: text('status').notNull().default('active'),
+  },
+  (t) => [
+    check('memberships_status_check', sql`${t.status} in ('active', 'deactivated')`),
+    unique('memberships_company_id_user_id_unique').on(t.companyId, t.userId),
+    unique('memberships_company_id_id_unique').on(t.companyId, t.id),
+    index('memberships_user_id_idx').on(t.userId),
+    // Same-company role only. No cascade: a role in use cannot be deleted.
+    foreignKey({
+      name: 'memberships_role_fk',
+      columns: [t.companyId, t.roleId],
+      foreignColumns: [roles.companyId, roles.id],
+    }),
+  ],
+);
+
+export const projectAssignments = pgTable(
+  'project_assignments',
+  {
+    ...common,
+    companyId: companyId(),
+    membershipId: uuid('membership_id').notNull(),
+    projectId: uuid('project_id').notNull(),
+  },
+  (t) => [
+    unique('project_assignments_membership_id_project_id_unique').on(t.membershipId, t.projectId),
+    foreignKey({
+      name: 'project_assignments_membership_fk',
+      columns: [t.companyId, t.membershipId],
+      foreignColumns: [memberships.companyId, memberships.id],
+    }).onDelete('cascade'),
+    foreignKey({
+      name: 'project_assignments_project_fk',
+      columns: [t.companyId, t.projectId],
+      foreignColumns: [projects.companyId, projects.id],
+    }).onDelete('cascade'),
+  ],
+);
+
+export const invitations = pgTable(
+  'invitations',
+  {
+    ...common,
+    companyId: companyId(),
+    email: text('email').notNull(),
+    roleId: uuid('role_id').notNull(),
+    /** Not FK-checked (arrays cannot be); validate within the tenant before insert. */
+    projectIds: uuid('project_ids')
+      .array()
+      .notNull()
+      .default(sql`'{}'::uuid[]`),
+    /** SHA-256 hex of the invitation token; the token itself is never stored. */
+    tokenHash: text('token_hash').notNull().unique(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    acceptedAt: timestamp('accepted_at', { withTimezone: true }),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    invitedBy: uuid('invited_by'),
+  },
+  (t) => [
+    check('invitations_email_lowercase_check', sql`${t.email} = lower(${t.email})`),
+    uniqueIndex('invitations_open_company_id_email_unique')
+      .on(t.companyId, t.email)
+      .where(sql`accepted_at is null and revoked_at is null`),
+    foreignKey({
+      name: 'invitations_role_fk',
+      columns: [t.companyId, t.roleId],
+      foreignColumns: [roles.companyId, roles.id],
+    }),
+  ],
 );
