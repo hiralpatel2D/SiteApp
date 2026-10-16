@@ -24,6 +24,9 @@ export const app = pools.app;
 export const ownerDb = pools.ownerDb;
 
 const TENANT_TABLES = [
+  'attendance_entries',
+  'face_registrations',
+  'attendance_settings',
   'audit_log',
   'invitations',
   'project_assignments',

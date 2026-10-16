@@ -58,7 +58,10 @@ describe('tenant isolation (RLS)', () => {
                     where col.table_schema = 'public' and col.table_name = c.relname and col.column_name = 'company_id')
       order by 1`);
     expect(rows.map((r) => r.table)).toEqual([
+      'attendance_entries',
+      'attendance_settings',
       'audit_log',
+      'face_registrations',
       'invitations',
       'memberships',
       'project_assignments',

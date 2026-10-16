@@ -159,3 +159,33 @@ REVOKE ALL ON FUNCTION app_open_invitation_exists(text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION app_open_invitation_exists(text) TO app_user;
 
 -- The owner role (migrations, platform admin) is exempt via superuser/BYPASSRLS.
+
+-- ---------------------------------------------------------------------------
+-- Attendance.
+-- ---------------------------------------------------------------------------
+
+REVOKE ALL ON attendance_settings, face_registrations, attendance_entries FROM PUBLIC;
+GRANT SELECT, INSERT, UPDATE ON attendance_settings, face_registrations, attendance_entries TO app_user;
+-- Re-assert on every run: attendance records are never deleted by the app role.
+REVOKE DELETE ON attendance_entries FROM app_user;
+
+ALTER TABLE attendance_settings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE attendance_settings FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON attendance_settings;
+CREATE POLICY tenant_isolation ON attendance_settings
+  USING (company_id = nullif(current_setting('app.company_id', true), '')::uuid)
+  WITH CHECK (company_id = nullif(current_setting('app.company_id', true), '')::uuid);
+
+ALTER TABLE face_registrations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE face_registrations FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON face_registrations;
+CREATE POLICY tenant_isolation ON face_registrations
+  USING (company_id = nullif(current_setting('app.company_id', true), '')::uuid)
+  WITH CHECK (company_id = nullif(current_setting('app.company_id', true), '')::uuid);
+
+ALTER TABLE attendance_entries ENABLE ROW LEVEL SECURITY;
+ALTER TABLE attendance_entries FORCE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON attendance_entries;
+CREATE POLICY tenant_isolation ON attendance_entries
+  USING (company_id = nullif(current_setting('app.company_id', true), '')::uuid)
+  WITH CHECK (company_id = nullif(current_setting('app.company_id', true), '')::uuid);

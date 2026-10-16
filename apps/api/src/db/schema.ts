@@ -2,6 +2,9 @@ import { sql } from 'drizzle-orm';
 import {
   boolean,
   check,
+  customType,
+  date,
+  doublePrecision,
   foreignKey,
   index,
   integer,
@@ -14,6 +17,11 @@ import {
   uuid,
 } from 'drizzle-orm/pg-core';
 import { newId } from '@sitediary/shared';
+
+/** Postgres bytea as a Node Buffer. */
+const bytea = customType<{ data: Buffer; driverData: Buffer }>({
+  dataType: () => 'bytea',
+});
 
 /** Columns every table carries (Global Constraints). */
 const common = {
@@ -272,5 +280,117 @@ export const invitations = pgTable(
       columns: [t.companyId, t.roleId],
       foreignColumns: [roles.companyId, roles.id],
     }),
+  ],
+);
+
+// ---------------------------------------------------------------------------
+// Attendance (face + geofence).
+// ---------------------------------------------------------------------------
+
+export const attendanceSettings = pgTable(
+  'attendance_settings',
+  {
+    ...common,
+    companyId: companyId(),
+    projectId: uuid('project_id').notNull(),
+    lat: doublePrecision('lat').notNull(),
+    lng: doublePrecision('lng').notNull(),
+    radiusM: integer('radius_m').notNull(),
+    startTime: text('start_time').notNull(),
+    lateAfterMin: integer('late_after_min').notNull(),
+    reminderTime: text('reminder_time').notNull(),
+    timezone: text('timezone').notNull().default('Asia/Kolkata'),
+  },
+  (t) => [
+    unique('attendance_settings_company_id_project_id_unique').on(t.companyId, t.projectId),
+    foreignKey({
+      name: 'attendance_settings_project_fk',
+      columns: [t.companyId, t.projectId],
+      foreignColumns: [projects.companyId, projects.id],
+    }).onDelete('cascade'),
+  ],
+);
+
+export const faceRegistrations = pgTable(
+  'face_registrations',
+  {
+    ...common,
+    companyId: companyId(),
+    membershipId: uuid('membership_id').notNull(),
+    status: text('status').notNull(),
+    template: bytea('template').notNull(),
+    modelVersion: text('model_version').notNull(),
+    consentAt: timestamp('consent_at', { withTimezone: true }).notNull(),
+    photo: bytea('photo'),
+    decidedBy: uuid('decided_by'),
+    decidedAt: timestamp('decided_at', { withTimezone: true }),
+  },
+  (t) => [
+    check(
+      'face_registrations_status_check',
+      sql`${t.status} in ('pending', 'approved', 'rejected', 'superseded')`,
+    ),
+    foreignKey({
+      name: 'face_registrations_membership_fk',
+      columns: [t.companyId, t.membershipId],
+      foreignColumns: [memberships.companyId, memberships.id],
+    }).onDelete('cascade'),
+    uniqueIndex('face_registrations_one_approved')
+      .on(t.membershipId)
+      .where(sql`${t.status} = 'approved'`),
+    uniqueIndex('face_registrations_one_pending')
+      .on(t.membershipId)
+      .where(sql`${t.status} = 'pending'`),
+  ],
+);
+
+export const attendanceEntries = pgTable(
+  'attendance_entries',
+  {
+    ...common,
+    companyId: companyId(),
+    membershipId: uuid('membership_id').notNull(),
+    projectId: uuid('project_id').notNull(),
+    /** Local calendar date (YYYY-MM-DD) in the project's timezone. */
+    workDate: date('work_date', { mode: 'string' }).notNull(),
+    kind: text('kind').notNull(),
+    at: timestamp('at', { withTimezone: true }).notNull(),
+    lat: doublePrecision('lat').notNull(),
+    lng: doublePrecision('lng').notNull(),
+    accuracyM: doublePrecision('accuracy_m').notNull(),
+    distanceM: doublePrecision('distance_m').notNull(),
+    similarity: doublePrecision('similarity'),
+    real: boolean('real').notNull(),
+    live: boolean('live').notNull(),
+    status: text('status').notNull(),
+    reasons: text('reasons')
+      .array()
+      .notNull()
+      .default(sql`'{}'::text[]`),
+    lateMin: integer('late_min').notNull().default(0),
+    reviewedBy: uuid('reviewed_by'),
+    reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
+    reviewNote: text('review_note'),
+    evidence: bytea('evidence').array(),
+  },
+  (t) => [
+    check('attendance_entries_kind_check', sql`${t.kind} in ('check_in', 'check_out')`),
+    check(
+      'attendance_entries_status_check',
+      sql`${t.status} in ('recorded', 'pending', 'approved', 'rejected')`,
+    ),
+    foreignKey({
+      name: 'attendance_entries_membership_fk',
+      columns: [t.companyId, t.membershipId],
+      foreignColumns: [memberships.companyId, memberships.id],
+    }).onDelete('cascade'),
+    foreignKey({
+      name: 'attendance_entries_project_fk',
+      columns: [t.companyId, t.projectId],
+      foreignColumns: [projects.companyId, projects.id],
+    }).onDelete('cascade'),
+    uniqueIndex('attendance_entries_one_per_day')
+      .on(t.membershipId, t.workDate, t.kind)
+      .where(sql`${t.status} <> 'rejected'`),
   ],
 );
