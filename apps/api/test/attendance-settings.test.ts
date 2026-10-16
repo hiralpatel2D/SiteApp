@@ -5,6 +5,10 @@ import { createCompany } from '../src/companies/create-company';
 import { auditLog, projectAssignments, projects } from '../src/db/schema';
 import { ownerDb, useTestDb } from './helpers/db';
 import { req, seedMember, testApp } from './helpers/auth';
+import { withTenant } from '../src/db/tenant';
+import { pools } from './helpers/db';
+import { sharesProject } from '../src/attendance/reach';
+import type { Tenant } from '../src/tenant/context';
 
 useTestDb();
 
@@ -83,6 +87,26 @@ describe('attendance settings', () => {
         ),
       );
     expect(audits).toHaveLength(1);
+    expect(audits[0]).toMatchObject({ entity: 'attendance_settings', before: null });
+    expect(audits[0]!.after).toMatchObject({ lat: 19.07, lng: 72.87, radiusM: 100 });
+    await call(ctx, ctx.admin.cookie, ctx.p1, 'PUT', {
+      lat: 19.07,
+      lng: 72.87,
+      radiusM: 250,
+      version: 1,
+    });
+    const again = await ownerDb
+      .select()
+      .from(auditLog)
+      .where(
+        and(
+          eq(auditLog.companyId, ctx.co.companyId),
+          eq(auditLog.action, 'attendance.settings_changed'),
+        ),
+      );
+    const upd = again.find((a) => a.before !== null)!;
+    expect(upd.before).toMatchObject({ radiusM: 100 });
+    expect(upd.after).toMatchObject({ radiusM: 250 });
   });
 
   it('update requires the current version; stale gets 409', async () => {
@@ -136,5 +160,36 @@ describe('attendance settings', () => {
     expect(ok.status).toBe(200);
     expect(((await ok.json()) as { settings: Settings }).settings.lat).toBe(19);
     expect((await call(ctx, ctx.assigned.cookie, ctx.p1)).status).toBe(404);
+  });
+
+  it('two parallel first PUTs give one 200 and one 409, never 500', async () => {
+    const ctx = await setup();
+    const rs = await Promise.all([
+      call(ctx, ctx.admin.cookie, ctx.p1, 'PUT', { lat: 19, lng: 72 }),
+      call(ctx, ctx.admin.cookie, ctx.p1, 'PUT', { lat: 19, lng: 72 }),
+    ]);
+    expect(rs.map((r) => r.status).sort()).toEqual([200, 409]);
+  });
+});
+
+describe('sharesProject', () => {
+  it('projects.all caller: same-company membership true, foreign false', async () => {
+    const ctx = await setup();
+    const other = await createCompany(ownerDb, { name: 'Charlie', slug: 'charlie' });
+    const foreignMember = await seedMember(other.companyId, 'admin', 'x@charlie.test');
+    const t: Tenant = {
+      companyId: ctx.co.companyId,
+      userId: ctx.admin.userId,
+      membershipId: ctx.admin.membershipId,
+      roleId: newId(),
+      roleKey: 'admin',
+      capabilities: new Set(['projects.all']),
+    };
+    const run = (id: string) =>
+      withTenant(pools.app, { companyId: t.companyId, userId: t.userId }, (tx) =>
+        sharesProject(tx, t, id),
+      );
+    expect(await run(ctx.eng.membershipId)).toBe(true);
+    expect(await run(foreignMember.membershipId)).toBe(false);
   });
 });

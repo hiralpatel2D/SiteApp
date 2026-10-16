@@ -89,14 +89,23 @@ export function settingsRoutes(): Hono<AppEnv> {
         )
         .for('update');
       if (!existing) {
-        await tx.insert(attendanceSettings).values({
-          id: newId(),
-          companyId: t.companyId,
-          projectId,
-          ...values,
-          createdBy: t.userId,
-          updatedBy: t.userId,
-        });
+        // FOR UPDATE locks nothing when the row is missing, so a concurrent first
+        // save can race us to the insert; the loser reports a stale version.
+        const inserted = await tx
+          .insert(attendanceSettings)
+          .values({
+            id: newId(),
+            companyId: t.companyId,
+            projectId,
+            ...values,
+            createdBy: t.userId,
+            updatedBy: t.userId,
+          })
+          .onConflictDoNothing({
+            target: [attendanceSettings.companyId, attendanceSettings.projectId],
+          })
+          .returning({ id: attendanceSettings.id });
+        if (inserted.length === 0) throw staleVersion();
       } else {
         if (existing.version !== body.version) throw staleVersion();
         await tx

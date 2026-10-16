@@ -1,5 +1,5 @@
 import { and, eq, sql } from 'drizzle-orm';
-import { projectAssignments, projects } from '../db/schema';
+import { memberships, projectAssignments, projects } from '../db/schema';
 import type { AppTx } from '../db/tenant';
 import type { Tenant } from '../tenant/context';
 
@@ -26,7 +26,13 @@ export async function canSeeProject(tx: AppTx, t: Tenant, projectId: string): Pr
 
 /** True when the tenant (with `projects.all`, or any common assignment) can reach another member. */
 export async function sharesProject(tx: AppTx, t: Tenant, membershipId: string): Promise<boolean> {
-  if (t.capabilities.has('projects.all')) return true;
+  if (t.capabilities.has('projects.all')) {
+    const [m] = await tx
+      .select({ id: memberships.id })
+      .from(memberships)
+      .where(and(eq(memberships.companyId, t.companyId), eq(memberships.id, membershipId)));
+    return !!m;
+  }
   const res = await tx.execute<{ ok: number }>(sql`
     select 1 as ok from project_assignments a
       join project_assignments b
