@@ -147,10 +147,14 @@ export const attendanceSettingsBodySchema = z.object({
 });
 export type AttendanceSettingsBody = z.infer<typeof attendanceSettingsBodySchema>;
 
-/** A raw base64 JPEG (no `data:` prefix). */
+/** Base64 length of a 300 KB JPEG. */
+const MAX_FRAME_CHARS = Math.ceil((300 * 1024) / 3) * 4;
+
+/** A raw base64 JPEG (no `data:` prefix), at most 300 KB decoded. */
 const frameSchema = z
   .string({ message: 'Send the photo frames again.' })
   .min(1, 'Send the photo frames again.')
+  .max(MAX_FRAME_CHARS, 'Photo is too large.')
   .regex(/^[A-Za-z0-9+/]+={0,2}$/, 'Send the photo frames again.');
 
 const framesSchema = (count: number) =>

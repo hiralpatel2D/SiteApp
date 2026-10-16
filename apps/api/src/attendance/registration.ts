@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
-import { and, asc, desc, eq } from 'drizzle-orm';
+import { bodyLimit } from 'hono/body-limit';
+import { and, asc, eq } from 'drizzle-orm';
 import { faceRegistrationBodySchema, newId } from '@sitediary/shared';
 import { writeAudit } from '../audit/audit';
 import type { AppEnv } from '../auth/session';
@@ -7,6 +8,7 @@ import type { Config } from '../config';
 import { faceRegistrations, memberships, users } from '../db/schema';
 import type { AppTx } from '../db/tenant';
 import { parseBody } from '../http/body';
+import { isUniqueViolation } from '../db/errors';
 import { AppError } from '../http/errors';
 import { rateLimit } from '../http/rate-limit';
 import { forbidden } from '../roles/authz';
@@ -20,6 +22,7 @@ const MIN_FACE_WIDTH = 160;
 const MIN_SCORE = 0.6;
 const MIN_AGREEMENT = 0.5;
 const PHOTO_FRAME = 2;
+const MAX_BODY_BYTES = 2 * 1024 * 1024;
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const notFound = () => new AppError(404, 'not_found', 'Not found.');
@@ -49,61 +52,85 @@ export type RegistrationDeps = { config: Config; faceEngine: FaceEngine };
 export function registrationRoutes({ config, faceEngine }: RegistrationDeps): Hono<AppEnv> {
   const r = new Hono<TenantEnv>();
 
-  r.post('/', rateLimit(REGISTER_LIMIT), requireCap('attendance.view'), async (c) => {
-    const body = await parseBody(c, faceRegistrationBodySchema);
-    const t = c.get('tenant');
-    const jpegs = body.frames.map((f) => Buffer.from(f, 'base64'));
-    const readings: FaceReading[] = [];
-    for (const jpeg of jpegs) readings.push(await faceEngine.read(jpeg));
-    if (!readings.every(isClear)) throw notClear();
-    const embeddings = readings.map((x) => x.embedding!);
-    for (let i = 0; i < embeddings.length; i++) {
-      for (let j = i + 1; j < embeddings.length; j++) {
-        if (faceEngine.similarity(embeddings[i]!, embeddings[j]!) < MIN_AGREEMENT) {
-          throw notConsistent();
+  r.post(
+    '/',
+    rateLimit(REGISTER_LIMIT),
+    requireCap('attendance.view'),
+    bodyLimit({
+      maxSize: MAX_BODY_BYTES,
+      onError: () => {
+        throw new AppError(413, 'too_large', 'Upload is too large.');
+      },
+    }),
+    async (c) => {
+      const body = await parseBody(c, faceRegistrationBodySchema);
+      const t = c.get('tenant');
+      const jpegs = body.frames.map((f) => Buffer.from(f, 'base64'));
+      const readings: FaceReading[] = [];
+      for (const jpeg of jpegs) readings.push(await faceEngine.read(jpeg));
+      if (!readings.every(isClear)) throw notClear();
+      const embeddings = readings.map((x) => x.embedding!);
+      for (let i = 0; i < embeddings.length; i++) {
+        for (let j = i + 1; j < embeddings.length; j++) {
+          if (faceEngine.similarity(embeddings[i]!, embeddings[j]!) < MIN_AGREEMENT) {
+            throw notConsistent();
+          }
         }
       }
-    }
-    const template = encryptTemplate(averageEmbedding(embeddings), config.faceTemplateKey);
-    await runInTenant(c, async (tx) => {
-      // A newer registration replaces any older pending one: the old row is marked rejected
-      // (the app role cannot delete) and its photo dropped, so the one-pending index holds.
-      await tx
-        .update(faceRegistrations)
-        .set({ status: 'rejected', photo: null, updatedBy: t.userId })
-        .where(
-          and(
-            eq(faceRegistrations.companyId, t.companyId),
-            eq(faceRegistrations.membershipId, t.membershipId),
-            eq(faceRegistrations.status, 'pending'),
-          ),
-        );
-      const id = newId();
-      await tx.insert(faceRegistrations).values({
-        id,
-        companyId: t.companyId,
-        membershipId: t.membershipId,
-        status: 'pending',
-        template,
-        modelVersion: faceEngine.modelVersion,
-        consentAt: new Date(),
-        photo: jpegs[PHOTO_FRAME]!,
-        createdBy: t.userId,
-        updatedBy: t.userId,
-      });
-      await writeAudit(tx, t, {
-        action: 'face.registered',
-        entity: 'face_registration',
-        entityId: id,
-        after: {
-          status: 'pending',
-          membershipId: t.membershipId,
-          modelVersion: faceEngine.modelVersion,
-        },
-      });
-    });
-    return c.json({ status: 'pending' });
-  });
+      const template = encryptTemplate(averageEmbedding(embeddings), config.faceTemplateKey);
+      try {
+        await runInTenant(c, async (tx) => {
+          // A newer registration replaces any older pending one: the old row becomes `superseded`
+          // (the app role cannot delete), its photo is dropped, and the one-pending index holds.
+          const replaced = await tx
+            .update(faceRegistrations)
+            .set({ status: 'superseded', photo: null, updatedBy: t.userId })
+            .where(
+              and(
+                eq(faceRegistrations.companyId, t.companyId),
+                eq(faceRegistrations.membershipId, t.membershipId),
+                eq(faceRegistrations.status, 'pending'),
+              ),
+            )
+            .returning({ id: faceRegistrations.id });
+          const id = newId();
+          await tx.insert(faceRegistrations).values({
+            id,
+            companyId: t.companyId,
+            membershipId: t.membershipId,
+            status: 'pending',
+            template,
+            modelVersion: faceEngine.modelVersion,
+            consentAt: new Date(),
+            photo: jpegs[PHOTO_FRAME]!,
+            createdBy: t.userId,
+            updatedBy: t.userId,
+          });
+          await writeAudit(tx, t, {
+            action: 'face.registered',
+            entity: 'face_registration',
+            entityId: id,
+            before: replaced[0] ? { replacedId: replaced[0].id } : null,
+            after: {
+              status: 'pending',
+              membershipId: t.membershipId,
+              modelVersion: faceEngine.modelVersion,
+            },
+          });
+        });
+      } catch (err) {
+        if (isUniqueViolation(err, 'face_registrations_one_pending')) {
+          throw new AppError(
+            409,
+            'registration_in_progress',
+            'A face registration is already being saved. Try again.',
+          );
+        }
+        throw err;
+      }
+      return c.json({ status: 'pending' });
+    },
+  );
 
   r.get('/me', requireCap('attendance.view'), async (c) => {
     const t = c.get('tenant');
@@ -116,11 +143,10 @@ export function registrationRoutes({ config, faceEngine }: RegistrationDeps): Ho
             eq(faceRegistrations.companyId, t.companyId),
             eq(faceRegistrations.membershipId, t.membershipId),
           ),
-        )
-        .orderBy(desc(faceRegistrations.createdAt));
+        );
       return list.map((x) => x.status);
     });
-    // An approved registration wins over a pending re-registration; otherwise the latest decision shows.
+    // Priority: approved > pending > rejected > none (an approved registration wins over a pending re-registration).
     const status = statuses.includes('approved')
       ? 'approved'
       : statuses.includes('pending')
@@ -149,6 +175,7 @@ export function registrationRoutes({ config, faceEngine }: RegistrationDeps): Ho
           and(
             eq(memberships.companyId, faceRegistrations.companyId),
             eq(memberships.id, faceRegistrations.membershipId),
+            eq(memberships.status, 'active'),
           ),
         )
         .innerJoin(users, eq(users.id, memberships.userId))
@@ -194,6 +221,11 @@ export function registrationRoutes({ config, faceEngine }: RegistrationDeps): Ho
       .for('update');
     if (!row) throw notFound();
     if (row.membershipId === t.membershipId) throw forbidden();
+    const [m] = await tx
+      .select({ status: memberships.status })
+      .from(memberships)
+      .where(and(eq(memberships.companyId, t.companyId), eq(memberships.id, row.membershipId)));
+    if (m?.status !== 'active') throw notFound();
     if (!(await sharesProject(tx, t, row.membershipId))) throw notFound();
     return row;
   }

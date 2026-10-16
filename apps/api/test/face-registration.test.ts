@@ -2,7 +2,13 @@ import { describe, it, expect } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { newId } from '@sitediary/shared';
 import { createCompany } from '../src/companies/create-company';
-import { auditLog, faceRegistrations, projectAssignments, projects } from '../src/db/schema';
+import {
+  auditLog,
+  faceRegistrations,
+  memberships,
+  projectAssignments,
+  projects,
+} from '../src/db/schema';
 import { createFakeEngine } from '../src/attendance/face/fake';
 import type { FaceReading } from '../src/attendance/face/types';
 import { ownerDb, useTestDb } from './helpers/db';
@@ -24,9 +30,23 @@ const GOOD: FaceReading = {
 const frame = (n: number) => Buffer.from([n, n, n, n]).toString('base64');
 const frames = (start = 1) => [0, 1, 2, 3, 4].map((i) => frame(start + i));
 
-async function setup(readings: Record<number, Partial<FaceReading>> = {}) {
+async function setup(readings: Record<number, Partial<FaceReading>> = {}, gateReads = 0) {
   const co = await createCompany(ownerDb, { name: 'Alpha Builders', slug: 'alpha' });
-  const faceEngine = createFakeEngine((jpeg) => ({ ...GOOD, ...readings[jpeg[0]!] }));
+  const base = createFakeEngine((jpeg) => ({ ...GOOD, ...readings[jpeg[0]!] }));
+  // With gateReads set, the last frame read of each request waits until that many requests have reached it, so parallel requests reach the DB together.
+  let started = 0;
+  let open!: () => void;
+  const gate = new Promise<void>((resolve) => (open = resolve));
+  const faceEngine = {
+    ...base,
+    async read(jpeg: Buffer) {
+      if (gateReads > 0 && (jpeg[0] === 5 || jpeg[0] === 14)) {
+        if (++started >= gateReads) open();
+        await gate;
+      }
+      return base.read(jpeg);
+    },
+  };
   const { deps } = testApp();
   const withEngine = (await import('../src/app')).createApp({ ...deps, faceEngine });
   const worker = await seedMember(co.companyId, 'site_engineer', 'w@alpha.test', {
@@ -121,8 +141,8 @@ describe('face registration', () => {
     await register(ctx, ctx.worker.cookie);
     await register(ctx, ctx.worker.cookie, frames(10));
     const all = await rows();
-    expect(all.map((r) => r.status).sort()).toEqual(['pending', 'rejected']);
-    expect(all.find((r) => r.status === 'rejected')!.photo).toBeNull();
+    expect(all.map((r) => r.status).sort()).toEqual(['pending', 'superseded']);
+    expect(all.find((r) => r.status === 'superseded')!.photo).toBeNull();
     expect(await statusOf(ctx, ctx.worker.cookie)).toBe('pending');
   });
 
@@ -228,5 +248,65 @@ describe('face registration', () => {
     expect(byId.get(first!.id)).toBe('superseded');
     expect(byId.get(pending.id)).toBe('approved');
     expect(await statusOf(ctx, ctx.worker.cookie)).toBe('approved');
+  });
+
+  it('records the replaced row id in the audit', async () => {
+    const ctx = await setup();
+    await register(ctx, ctx.worker.cookie);
+    const [first] = await rows();
+    await register(ctx, ctx.worker.cookie, frames(10));
+    const audits = await ownerDb
+      .select()
+      .from(auditLog)
+      .where(eq(auditLog.action, 'face.registered'));
+    expect(audits.map((a) => a.before)).toContainEqual({ replacedId: first!.id });
+  });
+
+  it('ignores deactivated members pending registrations', async () => {
+    const ctx = await setup();
+    await register(ctx, ctx.worker.cookie);
+    const [row] = await rows();
+    await ownerDb
+      .update(memberships)
+      .set({ status: 'deactivated' })
+      .where(eq(memberships.id, ctx.worker.membershipId));
+    const list = (await (await call(ctx, ctx.pm.cookie, '/pending')).json()) as {
+      pending: unknown[];
+    };
+    expect(list.pending).toHaveLength(0);
+    expect((await call(ctx, ctx.pm.cookie, `/${row!.id}/approve`, 'POST', {})).status).toBe(404);
+    expect((await call(ctx, ctx.pm.cookie, `/${row!.id}/reject`, 'POST', {})).status).toBe(404);
+  });
+
+  it('rejects an oversized frame with 400', async () => {
+    const ctx = await setup();
+    const f = frames();
+    f[1] = 'A'.repeat(Math.ceil((300 * 1024) / 3) * 4 + 4);
+    const res = await register(ctx, ctx.worker.cookie, f);
+    expect(res.status).toBe(400);
+    const e = (await res.json()) as { error: { code: string; details?: unknown } };
+    expect(e.error.code).toBe('validation_failed');
+    expect(e.error.details).toBeDefined();
+  });
+
+  it('rejects a body over 2 MB with 413', async () => {
+    const ctx = await setup();
+    const big = Array.from({ length: 5 }, () => 'A'.repeat(500_000));
+    const res = await register(ctx, ctx.worker.cookie, big);
+    expect(res.status).toBe(413);
+    const e = await errorOf(res);
+    expect(e).toMatchObject({ code: 'too_large', message: 'Upload is too large.' });
+  });
+
+  it('two parallel first registrations: one succeeds, one gets 409', async () => {
+    const ctx = await setup({}, 2);
+    const rs = await Promise.all([
+      register(ctx, ctx.worker.cookie),
+      register(ctx, ctx.worker.cookie, frames(10)),
+    ]);
+    const codes = rs.map((r) => r.status).sort();
+    expect(codes).toEqual([200, 409]);
+    const loser = rs.find((r) => r.status === 409)!;
+    expect((await errorOf(loser)).code).toBe('registration_in_progress');
   });
 });
