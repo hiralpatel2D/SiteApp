@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { evaluateFrame } from '../src/attendance/face-guide';
+import { createBlinkTracker, evaluateFrame, yawFromGestures } from '../src/attendance/face-guide';
 
 const base = { videoW: 1000, videoH: 800, blink: false };
 // 400 wide (40%), centred at (500, 400).
@@ -51,5 +51,61 @@ describe('evaluateFrame', () => {
       kind: 'ready',
       yaw: 'left',
     });
+  });
+});
+
+describe('createBlinkTracker', () => {
+  it('latches a blink lasting 10-800 ms', () => {
+    const t = createBlinkTracker();
+    t.update(true, 1000, true);
+    expect(t.blinked).toBe(false);
+    t.update(false, 1200, true);
+    expect(t.blinked).toBe(true);
+  });
+  it('ignores blinks under 10 ms', () => {
+    const t = createBlinkTracker();
+    t.update(true, 1000, true);
+    t.update(false, 1005, true);
+    expect(t.blinked).toBe(false);
+  });
+  it('ignores closures over 800 ms', () => {
+    const t = createBlinkTracker();
+    t.update(true, 1000, true);
+    t.update(false, 1900, true);
+    expect(t.blinked).toBe(false);
+  });
+  it('losing the face (not ready) clears the latch', () => {
+    const t = createBlinkTracker();
+    t.update(true, 1000, true);
+    t.update(false, 1200, true);
+    t.update(false, 1300, false);
+    expect(t.blinked).toBe(false);
+  });
+  it('a blink while not ready does not count', () => {
+    const t = createBlinkTracker();
+    t.update(true, 1000, false);
+    t.update(false, 1200, true);
+    expect(t.blinked).toBe(false);
+  });
+  it('reset clears the latch', () => {
+    const t = createBlinkTracker();
+    t.update(true, 1000, true);
+    t.update(false, 1200, true);
+    t.reset();
+    expect(t.blinked).toBe(false);
+  });
+});
+
+describe('yawFromGestures', () => {
+  it('swaps left/right when mirrored (user perspective)', () => {
+    expect(yawFromGestures(['facing left'], true)).toBe('right');
+    expect(yawFromGestures(['facing right'], true)).toBe('left');
+  });
+  it('passes through when not mirrored', () => {
+    expect(yawFromGestures(['facing left'], false)).toBe('left');
+    expect(yawFromGestures(['facing right'], false)).toBe('right');
+  });
+  it('is centre otherwise', () => {
+    expect(yawFromGestures(['blink left eye'], true)).toBe('centre');
   });
 });

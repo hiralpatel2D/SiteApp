@@ -3,6 +3,10 @@
 // centring, blink, yaw); the server decides matches.
 import type { Human } from '@vladmandic/human';
 
+/**
+ * Head turn from the USER's perspective: 'left' means the person turned to their own
+ * left as they see it on a mirrored (selfie) preview. See createGuide's `mirrored`.
+ */
 export type Yaw = 'left' | 'centre' | 'right';
 
 export type GuideState =
@@ -44,10 +48,50 @@ export function evaluateFrame(f: FrameInput): GuideState {
   return { kind: 'ready', blinked: f.blink, yaw: f.yaw ?? 'centre' };
 }
 
+/** Latches a blink (eyes closed 10-800 ms) only while the face is 'ready'. */
+export function createBlinkTracker() {
+  let closedSince: number | null = null;
+  let latched = false;
+  return {
+    get blinked() {
+      return latched;
+    },
+    update(isClosed: boolean, now: number, ready: boolean) {
+      if (!ready) {
+        closedSince = null;
+        latched = false;
+        return;
+      }
+      if (isClosed) {
+        closedSince ??= now;
+      } else if (closedSince !== null) {
+        const d = now - closedSince;
+        if (d >= BLINK_MIN_MS && d <= BLINK_MAX_MS) latched = true;
+        closedSince = null;
+      }
+    },
+    reset() {
+      closedSince = null;
+      latched = false;
+    },
+  };
+}
+
+/** Maps Human's gesture strings to a Yaw; swaps left/right when the preview is mirrored. */
+export function yawFromGestures(gestures: string[], mirrored: boolean): Yaw {
+  const l = gestures.includes('facing left');
+  const r = gestures.includes('facing right');
+  if (l === r) return 'centre';
+  return l === mirrored ? 'right' : 'left';
+}
+
 export interface Guide {
   next(): Promise<GuideState>;
   /** Raw base64 JPEG (no data: prefix). */
   capture(maxSide?: number, quality?: number): Promise<string>;
+  /** Forget the blink latch (e.g. when starting a new capture step). */
+  resetBlink(): void;
+  /** Stops guidance and releases the camera: stops every track of video.srcObject and clears it. */
   stop(): void;
 }
 
@@ -62,11 +106,17 @@ declare global {
 const FAKE_JPEG =
   '/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDABALDA4MChAODQ4SERATGCgaGBYWGDEjJR0oOjM9PDkzODdASFxOQERXRTc4UG1RV19iZ2hnPk1xeXBkeFxlZ2P/2wBDARESEhgVGC8aGi9jQjhCY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2P/wAARCAAIAAgDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwAooooA/9k=';
 
-export function createGuide(video: HTMLVideoElement): Guide {
+/**
+ * The caller attaches the camera stream to `video`; the guide releases it in stop().
+ * `mirrored` (default true) says the preview is shown as a selfie mirror, so Human's
+ * left/right are swapped to report yaw from the user's perspective.
+ */
+export function createGuide(video: HTMLVideoElement, mirrored = true): Guide {
   if (typeof window !== 'undefined' && window.__SD_FAKE_FACE__) {
     return {
       next: async () => ({ kind: 'ready', blinked: true, yaw: 'centre' }),
       capture: async () => FAKE_JPEG,
+      resetBlink: () => {},
       stop: () => {},
     };
   }
@@ -74,8 +124,7 @@ export function createGuide(video: HTMLVideoElement): Guide {
   let human: Human | undefined;
   let loading: Promise<Human> | undefined;
   let stopped = false;
-  let closedSince: number | null = null;
-  let blinked = false;
+  const blink = createBlinkTracker();
 
   function load(): Promise<Human> {
     loading ??= import('@vladmandic/human').then(async (mod) => {
@@ -105,17 +154,10 @@ export function createGuide(video: HTMLVideoElement): Guide {
       await h.warmup();
       return h;
     });
+    loading.catch(() => {
+      loading = undefined; // allow a retry after a failed load
+    });
     return loading;
-  }
-
-  function trackBlink(isClosed: boolean, now: number) {
-    if (isClosed) {
-      closedSince ??= now;
-    } else if (closedSince !== null) {
-      const d = now - closedSince;
-      if (d >= BLINK_MIN_MS && d <= BLINK_MAX_MS) blinked = true;
-      closedSince = null;
-    }
   }
 
   return {
@@ -125,26 +167,27 @@ export function createGuide(video: HTMLVideoElement): Guide {
       const res = await human.detect(video);
       const faces = res.face.length;
       const gestures = res.gesture.map((g) => ('gesture' in g ? String(g.gesture) : ''));
-      trackBlink(
-        gestures.some((g) => g.startsWith('blink')),
-        performance.now(),
-      );
-      const yaw: Yaw = gestures.includes('facing left')
-        ? 'left'
-        : gestures.includes('facing right')
-          ? 'right'
-          : 'centre';
       const box = res.face[0]?.box;
-      return evaluateFrame({
+      const input: FrameInput = {
         faces,
         box: box ? [box[0], box[1], box[2], box[3]] : undefined,
         videoW: video.videoWidth,
         videoH: video.videoHeight,
-        blink: blinked,
-        yaw,
-      });
+        blink: false,
+        yaw: yawFromGestures(gestures, mirrored),
+      };
+      const state = evaluateFrame(input);
+      blink.update(
+        gestures.some((g) => g.startsWith('blink')),
+        performance.now(),
+        state.kind === 'ready',
+      );
+      return state.kind === 'ready' ? { ...state, blinked: blink.blinked } : state;
     },
     async capture(maxSide = 640, quality = 0.85) {
+      if (!video.videoWidth || !video.videoHeight) {
+        throw new Error('camera not ready: video has no dimensions');
+      }
       const scale = Math.min(1, maxSide / Math.max(video.videoWidth, video.videoHeight));
       const canvas = document.createElement('canvas');
       canvas.width = Math.round(video.videoWidth * scale);
@@ -154,8 +197,12 @@ export function createGuide(video: HTMLVideoElement): Guide {
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
       return canvas.toDataURL('image/jpeg', quality).replace(/^data:image\/jpeg;base64,/, '');
     },
+    resetBlink: () => blink.reset(),
     stop() {
       stopped = true;
+      const stream = video.srcObject;
+      if (stream instanceof MediaStream) stream.getTracks().forEach((t) => t.stop());
+      video.srcObject = null;
     },
   };
 }

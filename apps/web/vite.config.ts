@@ -11,6 +11,14 @@ import { VitePWA } from 'vite-plugin-pwa';
 const apiProxy = { '/api': { target: process.env.API_URL || 'http://localhost:3000' } };
 
 export default defineConfig({
+  build: {
+    rollupOptions: {
+      output: {
+        // Stable name so the PWA can exclude it from the precache and cache it at runtime.
+        manualChunks: (id) => (id.includes('@vladmandic/human') ? 'human' : undefined),
+      },
+    },
+  },
   server: { proxy: apiProxy },
   preview: { proxy: apiProxy },
   plugins: [
@@ -35,9 +43,18 @@ export default defineConfig({
       workbox: {
         // App shell only: precache built assets, never runtime-cache API calls.
         globPatterns: ['**/*.{js,css,html,svg,woff2}'],
-        // Face models (~4.5 MB) are runtime-cached on first use, not precached.
-        globIgnores: ['face-models/**'],
+        // Face models (~4.5 MB) and the Human chunk (~1.5 MB) are runtime-cached on first use.
+        globIgnores: ['face-models/**', 'assets/human-*.js'],
         runtimeCaching: [
+          {
+            urlPattern: ({ url }) => /^\/assets\/human-.*\.js$/.test(url.pathname),
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'human-lib',
+              expiration: { maxEntries: 4 },
+              cacheableResponse: { statuses: [200] },
+            },
+          },
           {
             urlPattern: ({ url }) => url.pathname.startsWith('/face-models/'),
             handler: 'CacheFirst',
