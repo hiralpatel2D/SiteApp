@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
-import { dirname, join } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { dirname, join, resolve, sep } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import sharp from 'sharp';
 import { AppError } from '../../http/errors';
 import { faceSimilarity, type FaceEngine, type FaceReading } from './types';
@@ -41,22 +41,43 @@ function dirUrl(dir: string): string {
   return pathToFileURL(dir).href + '/';
 }
 
-/** Serves `file://` URLs from disk; anything else goes to the real fetch. */
-function fileFetch(realFetch: typeof fetch): typeof fetch {
+/**
+ * Wraps `realFetch` to serve `file://` URLs under one of `allowedDirs` (each a `file://` URL
+ * ending in `/`) from disk. Every other URL, including other `file://` paths, goes to `realFetch`.
+ */
+export function fileFetch(realFetch: typeof fetch, allowedDirs: string[]): typeof fetch {
+  const allowed = allowedDirs.map((d) => resolve(fileURLToPath(d)) + sep);
   return async (input, init) => {
-    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-    if (!url.startsWith('file://')) return realFetch(input, init);
-    const body = await readFile(new URL(url));
-    const type = url.endsWith('.json')
+    const raw = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+    if (!raw.startsWith('file:')) return realFetch(input, init);
+    // Normalise with path.resolve: Node 22's URL parser leaves `..` after some segments
+    // (e.g. `.pnpm`) unresolved, so a URL prefix check alone could be escaped.
+    let path: string;
+    try {
+      path = resolve(fileURLToPath(raw));
+    } catch {
+      return realFetch(input, init);
+    }
+    if (!allowed.some((dir) => path.startsWith(dir))) return realFetch(input, init);
+    const body = await readFile(path);
+    const type = path.endsWith('.json')
       ? 'application/json'
-      : url.endsWith('.wasm')
+      : path.endsWith('.wasm')
         ? 'application/wasm'
         : 'application/octet-stream';
     return new Response(body, { status: 200, headers: { 'content-type': type } });
   };
 }
 
+let loads = 0;
+
+/** How many times the models have started loading in this process (for tests). */
+export function humanLoadCount(): number {
+  return loads;
+}
+
 async function loadHuman(): Promise<HumanInstance> {
+  loads++;
   const humanDir = packageDir('@vladmandic/human', 2); // <pkg>/dist/human.node.js
   const wasmDir = dirname(require.resolve('@tensorflow/tfjs-backend-wasm')); // <pkg>/dist
   const mod = require(join(humanDir, 'dist', 'human.node-wasm.js')) as {
@@ -65,10 +86,12 @@ async function loadHuman(): Promise<HumanInstance> {
   };
   const Human = mod.default ?? mod.Human;
   if (!Human) throw new Error('Human library did not export a constructor');
+  const wasmUrl = dirUrl(wasmDir);
+  const modelsUrl = dirUrl(join(humanDir, 'models'));
   const human = new Human({
     backend: 'wasm',
-    wasmPath: dirUrl(wasmDir),
-    modelBasePath: dirUrl(join(humanDir, 'models')),
+    wasmPath: wasmUrl,
+    modelBasePath: modelsUrl,
     debug: false,
     cacheSensitivity: 0,
     face: {
@@ -88,7 +111,7 @@ async function loadHuman(): Promise<HumanInstance> {
     segmentation: { enabled: false },
   });
   const realFetch = globalThis.fetch;
-  globalThis.fetch = fileFetch(realFetch);
+  globalThis.fetch = fileFetch(realFetch, [wasmUrl, modelsUrl]);
   try {
     await human.load();
   } finally {
@@ -101,57 +124,76 @@ function invalidImage(): AppError {
   return new AppError(400, 'invalid_image', 'Could not read the photo. Try again.');
 }
 
-/** Face engine on @vladmandic/human (wasm backend). Models load on the first read. */
+/** Largest photo accepted, in pixels (sharp `limitInputPixels`). */
+const MAX_INPUT_PIXELS = 4096 * 4096;
+
+/**
+ * Decodes a JPEG to raw RGB, honouring EXIF rotation and scaling it down (never up) to fit
+ * 640×640. Anything that is not a readable JPEG of at most 4096×4096 pixels is `invalid_image`.
+ */
+export async function decodeJpeg(jpeg: Buffer): Promise<{ data: Buffer; info: sharp.OutputInfo }> {
+  // JPEG magic bytes; checked first so sharp never parses PNG, SVG or other formats.
+  if (jpeg.length < 3 || jpeg[0] !== 0xff || jpeg[1] !== 0xd8 || jpeg[2] !== 0xff) {
+    throw invalidImage();
+  }
+  let decoded: { data: Buffer; info: sharp.OutputInfo };
+  try {
+    decoded = await sharp(jpeg, { limitInputPixels: MAX_INPUT_PIXELS })
+      .rotate()
+      .resize({ width: 640, height: 640, fit: 'inside', withoutEnlargement: true })
+      .removeAlpha()
+      .raw()
+      .toBuffer({ resolveWithObject: true });
+  } catch {
+    throw invalidImage();
+  }
+  if (decoded.info.channels !== 3) throw invalidImage();
+  return decoded;
+}
+
+// One model set per process, shared by every engine: loading takes ~300 MB.
+let loading: Promise<HumanInstance> | null = null;
+// One detection at a time: Human keeps per-instance state and the wasm backend is single-threaded.
+let queue: Promise<unknown> = Promise.resolve();
+
+function sharedHuman(): Promise<HumanInstance> {
+  loading ??= loadHuman().catch((err: unknown) => {
+    loading = null; // let a later read retry
+    throw err;
+  });
+  return loading;
+}
+
+async function detect(jpeg: Buffer): Promise<FaceReading> {
+  const { data, info } = await decodeJpeg(jpeg);
+  const h = await sharedHuman();
+  const tensor = h.tf.tensor3d(new Uint8Array(data), [info.height, info.width, 3], 'int32');
+  let result: Awaited<ReturnType<HumanInstance['detect']>>;
+  try {
+    result = await h.detect(tensor);
+  } finally {
+    tensor.dispose();
+  }
+  if (result.error) throw new Error(`Face detection failed: ${result.error}`);
+  const faces = result.face;
+  if (faces.length === 0) return { faces: 0, minFaceWidth: 0, embedding: null, real: 0, live: 0 };
+  const only = faces.length === 1 ? faces[0] : undefined;
+  return {
+    faces: faces.length,
+    minFaceWidth: Math.min(...faces.map((f) => f.box[2])),
+    embedding: only?.embedding?.length ? Array.from(only.embedding) : null,
+    real: Math.min(...faces.map((f) => f.real ?? 0)),
+    live: Math.min(...faces.map((f) => f.live ?? 0)),
+  };
+}
+
+/**
+ * Face engine on @vladmandic/human (wasm backend). Models load on the first read and are
+ * shared by all engines in the process; reads run one at a time.
+ */
 export function createHumanEngine(): FaceEngine {
-  let loading: Promise<HumanInstance> | null = null;
-  let queue: Promise<unknown> = Promise.resolve();
-
-  function human(): Promise<HumanInstance> {
-    loading ??= loadHuman().catch((err: unknown) => {
-      loading = null; // let a later read retry
-      throw err;
-    });
-    return loading;
-  }
-
-  async function detect(jpeg: Buffer): Promise<FaceReading> {
-    let decoded: { data: Buffer; info: sharp.OutputInfo };
-    try {
-      decoded = await sharp(jpeg)
-        .rotate()
-        .resize({ width: 640, height: 640, fit: 'inside' })
-        .removeAlpha()
-        .raw()
-        .toBuffer({ resolveWithObject: true });
-    } catch {
-      throw invalidImage();
-    }
-    const { data, info } = decoded;
-    if (info.channels !== 3) throw invalidImage();
-    const h = await human();
-    const tensor = h.tf.tensor3d(new Uint8Array(data), [info.height, info.width, 3], 'int32');
-    let result: Awaited<ReturnType<HumanInstance['detect']>>;
-    try {
-      result = await h.detect(tensor);
-    } finally {
-      tensor.dispose();
-    }
-    if (result.error) throw new Error(`Face detection failed: ${result.error}`);
-    const faces = result.face;
-    if (faces.length === 0) return { faces: 0, minFaceWidth: 0, embedding: null, real: 0, live: 0 };
-    const only = faces.length === 1 ? faces[0] : undefined;
-    return {
-      faces: faces.length,
-      minFaceWidth: Math.min(...faces.map((f) => f.box[2])),
-      embedding: only?.embedding?.length ? Array.from(only.embedding) : null,
-      real: Math.min(...faces.map((f) => f.real ?? 0)),
-      live: Math.min(...faces.map((f) => f.live ?? 0)),
-    };
-  }
-
   return {
     modelVersion: HUMAN_MODEL_VERSION,
-    // One detection at a time: Human keeps per-instance state and the wasm backend is single-threaded.
     read(jpeg) {
       const run = queue.then(() => detect(jpeg));
       queue = run.catch(() => undefined);

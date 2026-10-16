@@ -1,7 +1,7 @@
 export type FaceReading = {
   /** Number of faces found. */
   faces: number;
-  /** Width in pixels of the smallest face, measured on the photo scaled to fit 640×640; 0 with no face. */
+  /** Width in pixels of the smallest face, in the photo as sent (only ever scaled down, to fit 640×640); 0 with no face. */
   minFaceWidth: number;
   /** Face descriptor when exactly one face was found, else null. */
   embedding: number[] | null;

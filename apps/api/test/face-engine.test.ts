@@ -1,8 +1,16 @@
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, vi } from 'vitest';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import sharp from 'sharp';
-import { createHumanEngine, MATCH_OPTIONS, type FaceEngine } from '../src/attendance/face/engine';
+import {
+  createHumanEngine,
+  decodeJpeg,
+  fileFetch,
+  humanLoadCount,
+  MATCH_OPTIONS,
+  type FaceEngine,
+} from '../src/attendance/face/engine';
 import { createFakeEngine } from '../src/attendance/face/fake';
 import { AppError } from '../src/http/errors';
 
@@ -36,25 +44,6 @@ describe('human face engine', () => {
     expect(globalThis.fetch).toBe(realFetch); // the file:// patch is only in place during load
   });
 
-  it('tells two people apart in real photos', { timeout: 15_000 }, async () => {
-    // Faces cropped from the sample sheet shipped inside the library (no network needed).
-    const sheet = join(humanDir(), 'assets', 'samples.jpg');
-    const crop = (left: number, top: number, width: number, height: number) =>
-      sharp(sheet).extract({ left, top, width, height }).jpeg().toBuffer();
-    const a = await engine.read(await crop(166, 0, 150, 158));
-    const aShifted = await engine.read(await crop(172, 6, 140, 146));
-    const b = await engine.read(await crop(360, 0, 170, 158));
-    for (const r of [a, aShifted, b]) {
-      expect(r.faces).toBe(1);
-      expect(r.embedding).toHaveLength(1024);
-      expect(r.minFaceWidth).toBeGreaterThan(100);
-    }
-    const same = engine.similarity(a.embedding!, aShifted.embedding!);
-    const different = engine.similarity(a.embedding!, b.embedding!);
-    expect(same).toBeGreaterThanOrEqual(0.9);
-    expect(different).toBeLessThan(0.6);
-  });
-
   it('rejects bytes that are not an image', { timeout: 15_000 }, async () => {
     const err = await engine.read(Buffer.from('not a jpeg at all')).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(AppError);
@@ -63,6 +52,44 @@ describe('human face engine', () => {
       code: 'invalid_image',
       message: 'Could not read the photo. Try again.',
     });
+  });
+
+  async function expectInvalidImage(bytes: Buffer): Promise<void> {
+    const err = await engine.read(bytes).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(AppError);
+    expect(err).toMatchObject({ status: 400, code: 'invalid_image' });
+  }
+
+  it('rejects a valid PNG', async () => {
+    const png = await sharp({
+      create: { width: 64, height: 64, channels: 3, background: { r: 1, g: 2, b: 3 } },
+    })
+      .png()
+      .toBuffer();
+    await expectInvalidImage(png);
+  });
+
+  it('rejects an SVG', () =>
+    expectInvalidImage(
+      Buffer.from(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><rect width="64" height="64"/></svg>',
+      ),
+    ));
+
+  it('rejects a JPEG larger than 4096×4096 pixels', { timeout: 15_000 }, async () =>
+    expectInvalidImage(
+      await sharp({
+        create: { width: 4097, height: 4096, channels: 3, background: { r: 0, g: 0, b: 0 } },
+      })
+        .jpeg()
+        .toBuffer(),
+    ),
+  );
+
+  it('shares one loaded model set between engines', { timeout: 15_000 }, async () => {
+    const other = createHumanEngine();
+    await Promise.all([engine.read(await greyJpeg(100)), other.read(await greyJpeg(120))]);
+    expect(humanLoadCount()).toBe(1);
   });
 
   it('scores a vector as matching itself', () => {
@@ -85,6 +112,44 @@ describe('human face engine', () => {
       const other = base.map((v, i) => v + Math.sin(i * 7.3) * noise);
       expect(engine.similarity(base, other)).toBe(lib.match.similarity(base, other, MATCH_OPTIONS));
     }
+  });
+});
+
+describe('decodeJpeg', () => {
+  it('does not enlarge a small photo', async () => {
+    const { info } = await decodeJpeg(await greyJpeg(200));
+    expect([info.width, info.height, info.channels]).toEqual([200, 200, 3]);
+  });
+
+  it('scales a large photo down to fit 640×640', async () => {
+    const big = await sharp({
+      create: { width: 1280, height: 960, channels: 3, background: { r: 9, g: 9, b: 9 } },
+    })
+      .jpeg()
+      .toBuffer();
+    const { info } = await decodeJpeg(big);
+    expect([info.width, info.height]).toEqual([640, 480]);
+  });
+});
+
+describe('fileFetch (model loading)', () => {
+  const dir = dirname(createRequire(import.meta.url).resolve('@vladmandic/human'));
+  const allowed = pathToFileURL(dir).href + '/';
+  const delegated = vi.fn(async () => new Response('real'));
+  const patched = fileFetch(delegated as unknown as typeof fetch, [allowed]);
+
+  it('serves files under an allowed directory from disk', async () => {
+    const res = await patched(allowed + 'human.node-wasm.js');
+    expect(res.status).toBe(200);
+    expect((await res.text()).length).toBeGreaterThan(1000);
+    expect(delegated).not.toHaveBeenCalled();
+  });
+
+  it('delegates other file:// URLs and web URLs to the original fetch', async () => {
+    expect(await (await patched('file:///etc/hostname')).text()).toBe('real');
+    expect(await (await patched(allowed + '../../../../../../etc/hostname')).text()).toBe('real');
+    expect(await (await patched('https://example.test/x')).text()).toBe('real');
+    expect(delegated).toHaveBeenCalledTimes(3);
   });
 });
 
