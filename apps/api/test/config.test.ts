@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { loadConfig } from '../src/config';
+import { DEV_FACE_TEMPLATE_KEY, loadConfig } from '../src/config';
 
 const base = {
   DATABASE_URL: 'postgres://a',
@@ -111,5 +111,51 @@ describe('loadConfig', () => {
           BOOTSTRAP_OWNER_PASSWORD: '12345678',
         }).bootstrapOwner?.password,
       ).toBe('12345678'));
+  });
+
+  describe('face template key', () => {
+    const key = Buffer.alloc(32, 7).toString('base64');
+    it('decodes FACE_TEMPLATE_KEY from base64', () =>
+      expect(loadConfig({ ...base, FACE_TEMPLATE_KEY: key }).faceTemplateKey).toEqual(
+        Buffer.alloc(32, 7),
+      ));
+    it('rejects a key that is not 32 bytes', () =>
+      expect(() =>
+        loadConfig({ ...base, FACE_TEMPLATE_KEY: Buffer.alloc(16).toString('base64') }),
+      ).toThrow('FACE_TEMPLATE_KEY'));
+    it('rejects a key that is not base64', () =>
+      expect(() => loadConfig({ ...base, FACE_TEMPLATE_KEY: '!!not base64!!' })).toThrow(
+        'FACE_TEMPLATE_KEY',
+      ));
+    it('requires the key in production', () =>
+      expect(() => loadConfig({ ...base, NODE_ENV: 'production' })).toThrow('FACE_TEMPLATE_KEY'));
+    it('falls back to the fixed development key outside production', () => {
+      expect(loadConfig(base).faceTemplateKey).toEqual(DEV_FACE_TEMPLATE_KEY);
+      expect(loadConfig({ ...base, NODE_ENV: 'test' }).faceTemplateKey).toEqual(
+        DEV_FACE_TEMPLATE_KEY,
+      );
+      expect(DEV_FACE_TEMPLATE_KEY).toHaveLength(32);
+    });
+    it('accepts a key in production', () =>
+      expect(
+        loadConfig({ ...base, NODE_ENV: 'production', FACE_TEMPLATE_KEY: key }).faceTemplateKey,
+      ).toHaveLength(32));
+  });
+
+  describe('face engine', () => {
+    const prod = {
+      ...base,
+      NODE_ENV: 'production',
+      FACE_TEMPLATE_KEY: Buffer.alloc(32).toString('base64'),
+    };
+    it('defaults to human', () => expect(loadConfig(base).faceEngine).toBe('human'));
+    it('accepts fake outside production', () =>
+      expect(loadConfig({ ...base, API_FACE_ENGINE: 'fake' }).faceEngine).toBe('fake'));
+    it('refuses fake in production', () =>
+      expect(() => loadConfig({ ...prod, API_FACE_ENGINE: 'fake' })).toThrow('API_FACE_ENGINE'));
+    it('rejects an unknown engine', () =>
+      expect(() => loadConfig({ ...base, API_FACE_ENGINE: 'other' })).toThrow('API_FACE_ENGINE'));
+    it('uses human in production by default', () =>
+      expect(loadConfig(prod).faceEngine).toBe('human'));
   });
 });
