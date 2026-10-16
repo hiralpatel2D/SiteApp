@@ -3,3 +3,4 @@ export * from './slug';
 export * from './capabilities';
 export * from './roles';
 export * from './api';
+export * from './attendance';
