@@ -56,6 +56,7 @@ Both services use the GitHub repo `hiralpatel2D/SiteApp`, branch `main`, root di
 
 | `BOOTSTRAP_OWNER_EMAIL`    | Optional, see **First owner login**. The owner's email; it must also be in `PLATFORM_ADMIN_EMAILS`. |
 | `BOOTSTRAP_OWNER_PASSWORD` | Optional, see **First owner login**. A temporary password (at least 8 characters). Delete it after the first sign-in. |
+| `FACE_TEMPLATE_KEY`        | Required: from the attendance release onwards `api` **will not start** in production without it, so add it before deploying. A random 32-byte key, base64-encoded, that encrypts the stored face templates used for attendance. Generate it with `openssl rand -base64 32` and use a different one in each environment. **Never change or lose it**: templates saved with the old key can no longer be read, and every worker would have to enrol again. |
 
 **`web` service**
 
@@ -64,6 +65,8 @@ Both services use the GitHub repo `hiralpatel2D/SiteApp`, branch `main`, root di
 | `API_INTERNAL_URL` | `http://${{api.RAILWAY_PRIVATE_DOMAIN}}:${{api.PORT}}` |
 
 Type the `${{ ... }}` parts exactly. Railway fills them in itself, and in each environment it uses that environment's own database.
+
+**Memory.** Face recognition for attendance runs inside `api`, so the `api` service needs about **350 MB** of memory. Check its memory limit in the service settings. The face models load on the first attendance photo, which takes under a second.
 
 ## First owner login
 

@@ -7,6 +7,9 @@ import type { Pools } from './db/pools';
 import type { EmailSender } from './email/email';
 import { errorHandler, notFoundHandler } from './http/errors';
 import { requireSameOrigin } from './http/origin';
+import { attendanceRoutes } from './attendance/routes';
+import { createFakeEngine } from './attendance/face/fake';
+import { createHumanEngine, type FaceEngine } from './attendance/face/engine';
 import { auditRoutes } from './audit/routes';
 import { invitationRoutes } from './invitations/routes';
 import { platformRoutes } from './platform/routes';
@@ -20,6 +23,8 @@ export type AppDeps = {
   pools: Pools;
   config: Config;
   email: EmailSender;
+  /** Overrides the engine chosen by `config.faceEngine` (tests). */
+  faceEngine?: FaceEngine;
 };
 
 export function createApp(deps: AppDeps): Hono<AppEnv> {
@@ -29,6 +34,10 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     email: deps.email,
     canSignUp: makeCanSignUp(deps),
   });
+
+  const faceEngine =
+    deps.faceEngine ??
+    (deps.config.faceEngine === 'fake' ? createFakeEngine() : createHumanEngine());
 
   const app = new Hono<AppEnv>();
   app.onError(errorHandler);
@@ -55,6 +64,10 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
   api.route('/users', userRoutes(deps.pools));
   api.route('/roles', roleRoutes(deps.pools));
   api.route('/projects', projectRoutes(deps.pools));
+  api.route(
+    '/attendance',
+    attendanceRoutes({ pools: deps.pools, config: deps.config, faceEngine }),
+  );
   api.route('/audit', auditRoutes(deps.pools));
   app.route('/api', api);
   return app;

@@ -1,7 +1,7 @@
 # Site Diary — Self Attendance (Geofence + Face) Design
 
 **Date:** 2026-10-15
-**Status:** Draft, awaiting owner review (a clickable demo comes before any build)
+**Status:** Approved by the owner on 2026-10-16. Build plan: `docs/superpowers/plans/2026-10-16-attendance-stage-a.md` (Stage A), with Stage B to follow.
 **Builds on:** `docs/superpowers/specs/2026-10-13-site-diary-core-design.md` (core platform) and the live Plan 2 code (auth, companies, roles, projects, audit)
 
 ---
@@ -148,6 +148,9 @@ Every insert, approval and rejection writes an audit row.
 | Tile | Unique icon on top; turns green only when attendance is marked |
 | Face flow | Screen turns green on recognition; hold 3 seconds to confirm; then a confirmation of the action taken |
 | Management view | Today summary, people list, pending queue, monthly calendar with Excel export |
+| Working days | **Every day.** Construction sites work all week, so there are no weekly offs or holidays in the calendar. A day without a check-in is absent. |
+| Libraries | Use relevant open-source GitHub projects. Face detection, recognition, anti-spoof and liveness use **vladmandic/human** (MIT): light models in the browser for guidance, and the decision on the server. Thresholds come from its Face ID demo. |
+| Green screen | The screen turns green only after the **server** confirms the face matches (one frame sent for a quick match). The 3-second hold then captures 3 frames, and the server re-checks everything before recording. |
 
 ## 12. Claude's calls (owner to check)
 
