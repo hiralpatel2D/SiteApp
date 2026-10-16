@@ -35,6 +35,19 @@ export default defineConfig({
       workbox: {
         // App shell only: precache built assets, never runtime-cache API calls.
         globPatterns: ['**/*.{js,css,html,svg,woff2}'],
+        // Face models (~4.5 MB) are runtime-cached on first use, not precached.
+        globIgnores: ['face-models/**'],
+        runtimeCaching: [
+          {
+            urlPattern: ({ url }) => url.pathname.startsWith('/face-models/'),
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'face-models',
+              expiration: { maxEntries: 20 },
+              cacheableResponse: { statuses: [200] },
+            },
+          },
+        ],
         navigateFallback: '/index.html',
         navigateFallbackDenylist: [/^\/api\//],
       },
