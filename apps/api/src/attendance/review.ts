@@ -1,5 +1,5 @@
 import { Hono, type Context } from 'hono';
-import { and, asc, eq, exists, ne, sql } from 'drizzle-orm';
+import { and, asc, count, eq, exists, ne, sql } from 'drizzle-orm';
 import { reviewDecisionBodySchema } from '@sitediary/shared';
 import { writeAudit } from '../audit/audit';
 import type { AppEnv } from '../auth/session';
@@ -36,18 +36,30 @@ async function loadDecidable(tx: AppTx, t: Tenant, rawId: string) {
     .for('update');
   if (!row) throw notFound();
   if (!(await canSeeProject(tx, t, row.projectId))) throw notFound();
+  const [m] = await tx
+    .select({ status: memberships.status })
+    .from(memberships)
+    .where(and(eq(memberships.companyId, t.companyId), eq(memberships.id, row.membershipId)));
+  if (m?.status !== 'active') throw notFound();
   if (row.membershipId === t.membershipId) throw forbidden();
   if (row.status !== 'pending') throw alreadyDecided();
   return row;
 }
 
+const PENDING_LIMIT = 50;
+
 /** `/pending`: senior review of attendance entries that failed a check. Mounted under the attendance router. */
 export function reviewRoutes(): Hono<AppEnv> {
   const r = new Hono<TenantEnv>();
 
+  /**
+   * GET /pending responds `{ entries, total }`: the oldest PENDING_LIMIT (50) pending entries the
+   * reviewer can see (own excluded), each with `photos` data URLs, and `total`, the count of all
+   * such entries. When total > entries.length, decide some and fetch again.
+   */
   r.get('/pending', requireCap('attendance.review'), async (c) => {
     const t = c.get('tenant');
-    const pending = await runInTenant(c, async (tx) => {
+    const out = await runInTenant(c, async (tx) => {
       const reach = t.capabilities.has('projects.all')
         ? sql`true`
         : exists(
@@ -62,6 +74,24 @@ export function reviewRoutes(): Hono<AppEnv> {
                 ),
               ),
           );
+      const where = and(
+        eq(attendanceEntries.companyId, t.companyId),
+        eq(attendanceEntries.status, 'pending'),
+        ne(attendanceEntries.membershipId, t.membershipId),
+        reach,
+      );
+      const [totalRow] = await tx
+        .select({ n: count() })
+        .from(attendanceEntries)
+        .innerJoin(
+          memberships,
+          and(
+            eq(memberships.companyId, attendanceEntries.companyId),
+            eq(memberships.id, attendanceEntries.membershipId),
+            eq(memberships.status, 'active'),
+          ),
+        )
+        .where(where);
       const rows = await tx
         .select({
           id: attendanceEntries.id,
@@ -105,21 +135,16 @@ export function reviewRoutes(): Hono<AppEnv> {
             eq(attendanceSettings.projectId, attendanceEntries.projectId),
           ),
         )
-        .where(
-          and(
-            eq(attendanceEntries.companyId, t.companyId),
-            eq(attendanceEntries.status, 'pending'),
-            ne(attendanceEntries.membershipId, t.membershipId),
-            reach,
-          ),
-        )
-        .orderBy(asc(attendanceEntries.at), asc(attendanceEntries.id));
-      return rows.map(({ evidence, ...row }) => ({
+        .where(where)
+        .orderBy(asc(attendanceEntries.at), asc(attendanceEntries.id))
+        .limit(PENDING_LIMIT);
+      const entries = rows.map(({ evidence, ...row }) => ({
         ...row,
         photos: (evidence ?? []).map(dataUrl),
       }));
+      return { entries, total: totalRow?.n ?? 0 };
     });
-    return c.json({ pending });
+    return c.json(out);
   });
 
   const decide = (action: 'approve' | 'reject') => {

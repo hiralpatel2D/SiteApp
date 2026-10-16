@@ -7,6 +7,7 @@ import {
   attendanceSettings,
   auditLog,
   faceRegistrations,
+  memberships,
   projectAssignments,
   projects,
 } from '../src/db/schema';
@@ -122,7 +123,7 @@ const asWorker = (ctx: Ctx, path: string, method = 'GET', body?: unknown) =>
     body,
   });
 const list = async (ctx: Ctx) =>
-  ((await (await asCoord(ctx, '/pending')).json()) as { pending: Pending[] }).pending;
+  ((await (await asCoord(ctx, '/pending')).json()) as { entries: Pending[] }).entries;
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['Date'] });
@@ -248,6 +249,108 @@ describe('attendance pending review', () => {
     const again = await asWorker(ctx, '/check', 'POST', { ...checkBody, lat: SITE.lat });
     expect(again.status).toBe(200);
     expect(((await again.json()) as { status: string }).status).toBe('recorded');
+  });
+
+  it('caps the list at 50 and reports the total', async () => {
+    const ctx = await setup();
+    const rows = Array.from({ length: 51 }, (_, i) => ({
+      id: newId(),
+      companyId: ctx.co.companyId,
+      membershipId: ctx.worker.membershipId,
+      projectId: ctx.p1,
+      workDate: new Date(Date.UTC(2026, 0, 1 + i)).toISOString().slice(0, 10),
+      kind: 'check_in',
+      at: new Date(EARLY.getTime() + i * 1000),
+      ...SITE,
+      accuracyM: 12,
+      distanceM: 250,
+      real: true,
+      live: true,
+      status: 'pending',
+      reasons: ['outside_radius'],
+    }));
+    await ownerDb.insert(attendanceEntries).values(rows);
+    const body = (await (await asCoord(ctx, '/pending')).json()) as {
+      entries: Pending[];
+      total: number;
+    };
+    expect(body.entries).toHaveLength(50);
+    expect(body.total).toBe(51);
+    expect(body.entries[0]!.id).toBe(rows[0]!.id);
+  });
+
+  it('treats entries of deactivated members as not found', async () => {
+    const ctx = await setup();
+    const id = await pendingEntry(ctx);
+    await ownerDb
+      .update(memberships)
+      .set({ status: 'deactivated' })
+      .where(eq(memberships.id, ctx.worker.membershipId));
+    expect(await list(ctx)).toHaveLength(0);
+    expect((await asCoord(ctx, `/pending/${id}/approve`, 'POST', {})).status).toBe(404);
+  });
+
+  it('lets a projects.all reviewer see unassigned projects', async () => {
+    const ctx = await setup();
+    const admin = await seedMember(ctx.co.companyId, 'admin', 'a@alpha.test', { app: ctx.app });
+    const id = await pendingEntry(ctx, { projectId: ctx.p2 });
+    const res = await req(ctx.app, '/api/attendance/pending', {
+      cookie: admin.cookie,
+      company: ctx.co.companyId,
+    });
+    const body = (await res.json()) as { entries: Pending[]; total: number };
+    expect(body.entries.map((e) => e.id)).toEqual([id]);
+    expect(body.total).toBe(1);
+  });
+
+  it('never lists or decides another company entry', async () => {
+    const ctx = await setup();
+    const other = await createCompany(ownerDb, { name: 'Bravo', slug: 'bravo' });
+    const ow = await seedMember(other.companyId, 'site_engineer', 'w@bravo.test');
+    const op = newId();
+    await ownerDb
+      .insert(projects)
+      .values({ id: op, companyId: other.companyId, name: 'Elsewhere', code: 'E1' });
+    await ownerDb.insert(attendanceSettings).values({
+      id: newId(),
+      companyId: other.companyId,
+      projectId: op,
+      ...SITE,
+      radiusM: 100,
+      startTime: '09:00',
+      lateAfterMin: 15,
+      reminderTime: '19:00',
+    });
+    const id = newId();
+    await ownerDb.insert(attendanceEntries).values({
+      id,
+      companyId: other.companyId,
+      membershipId: ow.membershipId,
+      projectId: op,
+      workDate: '2026-10-16',
+      kind: 'check_in',
+      at: EARLY,
+      ...SITE,
+      accuracyM: 12,
+      distanceM: 250,
+      real: true,
+      live: true,
+      status: 'pending',
+      reasons: ['outside_radius'],
+    });
+    expect(await list(ctx)).toHaveLength(0);
+    expect((await asCoord(ctx, `/pending/${id}/approve`, 'POST', {})).status).toBe(404);
+  });
+
+  it('persists the reject note', async () => {
+    const ctx = await setup();
+    const id = await pendingEntry(ctx);
+    await asCoord(ctx, `/pending/${id}/reject`, 'POST', { note: 'Wrong site' });
+    const [row] = await ownerDb
+      .select()
+      .from(attendanceEntries)
+      .where(eq(attendanceEntries.id, id));
+    expect(row).toMatchObject({ status: 'rejected', reviewNote: 'Wrong site' });
   });
 
   it('lists oldest first', async () => {

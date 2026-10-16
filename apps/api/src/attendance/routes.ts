@@ -11,7 +11,7 @@ import { settingsRoutes } from './settings';
 
 export type AttendanceDeps = { pools: Pools; config: Config; faceEngine: FaceEngine };
 
-/** `/api/attendance`: face-verified attendance.  */
+/** `/api/attendance`: face-verified attendance. */
 export function attendanceRoutes(deps: AttendanceDeps): Hono<AppEnv> {
   const r = new Hono<TenantEnv>();
   r.use('*', requireUser, tenantMiddleware(deps.pools));
