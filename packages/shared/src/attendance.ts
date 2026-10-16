@@ -20,8 +20,10 @@ export const ATTENDANCE_DEFAULTS = {
 const EARTH_RADIUS_M = 6371008.8;
 const MAX_ACCURACY_M = 100;
 const MIN_PLAUSIBLE_ACCURACY_M = 1;
-const MIN_SIMILARITY = 0.5;
-const MIN_LIVENESS = 0.6;
+/** Lowest face similarity (0..1) that counts as the registered person. */
+export const MIN_SIMILARITY = 0.5;
+/** Lowest anti-spoof and liveness score (0..1) that passes. */
+export const MIN_LIVENESS = 0.6;
 const MIN_FACE_WIDTH_PX = 160;
 
 export type LatLng = { lat: number; lng: number };
@@ -175,6 +177,10 @@ export const checkBodySchema = z.object({
   frames: framesSchema(CHECK_FRAME_COUNT),
 });
 export type CheckBody = z.infer<typeof checkBodySchema>;
+
+/** `POST` a single frame to preview the face match (records nothing). */
+export const matchBodySchema = z.object({ frame: frameSchema });
+export type MatchBody = z.infer<typeof matchBodySchema>;
 
 /** `POST` face registration. */
 export const faceRegistrationBodySchema = z.object({

@@ -46,6 +46,42 @@ const isClear = (r: FaceReading) =>
   r.live >= MIN_SCORE &&
   r.embedding !== null;
 
+export type FaceStatus = 'none' | 'pending' | 'approved' | 'rejected';
+
+/** The caller's face registration status: approved > pending > rejected > none. */
+export async function faceStatus(tx: AppTx, t: Tenant): Promise<FaceStatus> {
+  const list = await tx
+    .select({ status: faceRegistrations.status })
+    .from(faceRegistrations)
+    .where(
+      and(
+        eq(faceRegistrations.companyId, t.companyId),
+        eq(faceRegistrations.membershipId, t.membershipId),
+      ),
+    );
+  const statuses = list.map((x) => x.status);
+  // An approved registration wins over a pending re-registration.
+  if (statuses.includes('approved')) return 'approved';
+  if (statuses.includes('pending')) return 'pending';
+  if (statuses.includes('rejected')) return 'rejected';
+  return 'none';
+}
+
+/** The caller's approved (encrypted) face template, or null when none is approved. */
+export async function approvedTemplate(tx: AppTx, t: Tenant): Promise<Buffer | null> {
+  const [row] = await tx
+    .select({ template: faceRegistrations.template })
+    .from(faceRegistrations)
+    .where(
+      and(
+        eq(faceRegistrations.companyId, t.companyId),
+        eq(faceRegistrations.membershipId, t.membershipId),
+        eq(faceRegistrations.status, 'approved'),
+      ),
+    );
+  return row?.template ?? null;
+}
+
 export type RegistrationDeps = { config: Config; faceEngine: FaceEngine };
 
 /** `/face`: face registration and senior approval. Mounted under the attendance router. */
@@ -134,26 +170,7 @@ export function registrationRoutes({ config, faceEngine }: RegistrationDeps): Ho
 
   r.get('/me', requireCap('attendance.view'), async (c) => {
     const t = c.get('tenant');
-    const statuses = await runInTenant(c, async (tx) => {
-      const list = await tx
-        .select({ status: faceRegistrations.status })
-        .from(faceRegistrations)
-        .where(
-          and(
-            eq(faceRegistrations.companyId, t.companyId),
-            eq(faceRegistrations.membershipId, t.membershipId),
-          ),
-        );
-      return list.map((x) => x.status);
-    });
-    // Priority: approved > pending > rejected > none (an approved registration wins over a pending re-registration).
-    const status = statuses.includes('approved')
-      ? 'approved'
-      : statuses.includes('pending')
-        ? 'pending'
-        : statuses.includes('rejected')
-          ? 'rejected'
-          : 'none';
+    const status = await runInTenant(c, (tx) => faceStatus(tx, t));
     return c.json({ status });
   });
 
