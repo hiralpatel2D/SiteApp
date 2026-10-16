@@ -90,6 +90,36 @@ describe('decideCheck', () => {
   });
 });
 
+describe('decideCheck edge cases', () => {
+  it.each(['distanceM', 'accuracyM', 'minFaceWidth', 'real', 'live', 'faces'] as const)(
+    'fails closed when %s is NaN',
+    (k) => expect(decideCheck({ ...ok, [k]: NaN }).status).toBe('pending'),
+  );
+  it('fails closed when similarity is NaN or null', () => {
+    expect(decideCheck({ ...ok, similarity: NaN })).toEqual({
+      status: 'pending',
+      reasons: ['Face not clear'],
+    });
+    expect(decideCheck({ ...ok, similarity: null })).toEqual({
+      status: 'pending',
+      reasons: ['Face not clear'],
+    });
+  });
+  it('rounds the distance up so the reason never contradicts the decision', () =>
+    expect(decideCheck({ ...ok, distanceM: 100.4 }).reasons).toEqual([
+      'Outside site radius (101 m, allowed 100 m)',
+    ]));
+  it('truncates the score', () =>
+    expect(decideCheck({ ...ok, similarity: 0.4996 }).reasons).toEqual([
+      'Face not matched (score 0.49)',
+    ]));
+  it('handles IST edges', () => {
+    expect(workDate(new Date('2026-10-16T18:29:00Z'))).toBe('2026-10-16');
+    expect(lateMinutes(new Date('2026-10-16T03:45:00Z'), '09:00', 15)).toBe(0);
+    expect(lateMinutes(new Date('2026-10-16T03:46:00Z'), '09:00', 15)).toBe(16);
+  });
+});
+
 describe('schemas', () => {
   it('applies settings defaults', () => {
     const r = attendanceSettingsBodySchema.parse({ lat: 19.07, lng: 72.87 });

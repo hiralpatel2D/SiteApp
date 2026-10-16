@@ -84,20 +84,29 @@ export type CheckDecision = { status: 'recorded' | 'pending'; reasons: string[] 
 /** Applies the attendance rules; reasons are listed radius, accuracy, face, liveness. */
 export function decideCheck(s: CheckSignals): CheckDecision {
   const reasons: string[] = [];
-  if (s.distanceM > s.radiusM) {
-    reasons.push(`Outside site radius (${Math.round(s.distanceM)} m, allowed ${s.radiusM} m)`);
+  // Every check is written so that NaN (or a missing value) fails closed.
+  if (!(s.distanceM <= s.radiusM)) {
+    const shown = Number.isFinite(s.distanceM) ? `${Math.ceil(s.distanceM)} m` : 'unknown distance';
+    reasons.push(`Outside site radius (${shown}, allowed ${s.radiusM} m)`);
   }
-  if (s.accuracyM > MAX_ACCURACY_M) {
-    reasons.push(`Location accuracy too low (±${Math.round(s.accuracyM)} m)`);
+  if (!(s.accuracyM <= MAX_ACCURACY_M)) {
+    reasons.push(
+      Number.isFinite(s.accuracyM)
+        ? `Location accuracy too low (±${Math.round(s.accuracyM)} m)`
+        : 'Location accuracy too low',
+    );
   } else if (s.accuracyM < MIN_PLAUSIBLE_ACCURACY_M) {
     reasons.push('Possible mock location');
   }
-  if (s.faces !== 1 || s.minFaceWidth < MIN_FACE_WIDTH_PX) {
+  if (s.faces !== 1 || !(s.minFaceWidth >= MIN_FACE_WIDTH_PX)) {
     reasons.push('Face not clear');
-  } else if (s.similarity !== null && s.similarity < MIN_SIMILARITY) {
-    reasons.push(`Face not matched (score ${s.similarity.toFixed(2)})`);
+  } else if (s.similarity === null || Number.isNaN(s.similarity)) {
+    reasons.push('Face not clear');
+  } else if (s.similarity < MIN_SIMILARITY) {
+    const truncated = Math.floor(s.similarity * 100 + 1e-9) / 100;
+    reasons.push(`Face not matched (score ${truncated.toFixed(2)})`);
   }
-  if (s.real < MIN_LIVENESS || s.live < MIN_LIVENESS) {
+  if (!(s.real >= MIN_LIVENESS) || !(s.live >= MIN_LIVENESS)) {
     reasons.push('Liveness failed');
   }
   return { status: reasons.length === 0 ? 'recorded' : 'pending', reasons };
