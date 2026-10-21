@@ -23,6 +23,17 @@ const bytea = customType<{ data: Buffer; driverData: Buffer }>({
   dataType: () => 'bytea',
 });
 
+/**
+ * bytea for `.array()` columns. Drizzle writes arrays as one text literal, so each
+ * element goes out in bytea hex form (\x…); raw Buffers would be pasted in as text
+ * and fail (or be mangled) on real binary such as JPEGs. pg reads `bytea[]` back as Buffers.
+ */
+const byteaElement = customType<{ data: Buffer; driverData: string | Buffer }>({
+  dataType: () => 'bytea',
+  toDriver: (b) => `\\x${b.toString('hex')}`,
+  fromDriver: (v) => (Buffer.isBuffer(v) ? v : Buffer.from(v.replace(/^\\x/, ''), 'hex')),
+});
+
 /** Columns every table carries (Global Constraints). */
 const common = {
   id: uuid('id')
@@ -371,7 +382,7 @@ export const attendanceEntries = pgTable(
     reviewedBy: uuid('reviewed_by'),
     reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
     reviewNote: text('review_note'),
-    evidence: bytea('evidence').array(),
+    evidence: byteaElement('evidence').array(),
   },
   (t) => [
     check('attendance_entries_kind_check', sql`${t.kind} in ('check_in', 'check_out')`),

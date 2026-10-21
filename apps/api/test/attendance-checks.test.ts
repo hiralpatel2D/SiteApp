@@ -209,6 +209,24 @@ describe('attendance check-in / check-out', () => {
     expect((await today(ctx)).checkIn?.status).toBe('pending');
   });
 
+  it('stores binary JPEG evidence byte for byte (not UTF-8, with quotes, commas and NULs)', async () => {
+    const ctx = await setup();
+    // A JPEG's SOI marker, then bytes a Postgres array literal would mangle.
+    const binary = [0, 1, 2].map((i) =>
+      Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x22, 0x5c, 0x2c, 0x7b, 0x7d, 0x00, 0x80 + i]),
+    );
+    const res = await check(ctx, 'check_in', {
+      lat: 19.08,
+      frames: binary.map((b) => b.toString('base64')),
+    });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as CheckResult).status).toBe('pending');
+    const [row] = await entries();
+    expect(row!.evidence!.map((b) => b.toString('hex'))).toEqual(
+      binary.map((b) => b.toString('hex')),
+    );
+  });
+
   it('check-out before check-in is check_in_first; duplicates are 409', async () => {
     const ctx = await setup();
     const early = await check(ctx, 'check_out');
