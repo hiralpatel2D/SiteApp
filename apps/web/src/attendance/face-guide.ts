@@ -29,6 +29,13 @@ export interface FrameInput {
 
 const MIN_FACE = 0.3;
 const MAX_FACE = 0.7;
+/** capture() scales photos down (never up) to fit this many pixels on the long side. */
+export const CAPTURE_MAX_SIDE = 640;
+/**
+ * Smallest face width, in CAPTURED pixels, that counts as ready. The server needs 160 px
+ * (MIN_FACE_WIDTH_PX); the margin covers its detector boxing a face a little tighter.
+ */
+export const MIN_CAPTURE_FACE_PX = 176;
 const CENTRE_BAND = 0.2; // centre must be within 0.5 +/- 0.2 (the middle 40%)
 const BLINK_MIN_MS = 10;
 const BLINK_MAX_MS = 800;
@@ -38,7 +45,8 @@ export function evaluateFrame(f: FrameInput): GuideState {
   if (f.faces > 1) return { kind: 'many-faces' };
   const [x, y, w, h] = f.box;
   const ratio = w / f.videoW;
-  if (ratio < MIN_FACE) return { kind: 'too-far' };
+  const captureScale = Math.min(1, CAPTURE_MAX_SIDE / Math.max(f.videoW, f.videoH));
+  if (ratio < MIN_FACE || w * captureScale < MIN_CAPTURE_FACE_PX) return { kind: 'too-far' };
   if (ratio > MAX_FACE) return { kind: 'too-close' };
   const cx = (x + w / 2) / f.videoW;
   const cy = (y + h / 2) / f.videoH;
@@ -105,8 +113,28 @@ declare global {
 const FAKE_YAWS: readonly Yaw[] = ['centre', 'left', 'right'];
 
 // 8x8 grey JPEG, raw base64.
-const FAKE_JPEG =
+const FAKE_JPEG_B64 =
   '/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDABALDA4MChAODQ4SERATGCgaGBYWGDEjJR0oOjM9PDkzODdASFxOQERXRTc4UG1RV19iZ2hnPk1xeXBkeFxlZ2P/2wBDARESEhgVGC8aGi9jQjhCY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2P/wAARCAAIAAgDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwAooooA/9k=';
+
+let fakeShots = 0;
+
+/**
+ * The fake JPEG with a counter in a COM segment right after SOI: every capture differs (as
+ * live frames do, so the server's replay check passes) and stays a valid JPEG.
+ */
+function fakeJpeg(): string {
+  const jpeg = Uint8Array.from(atob(FAKE_JPEG_B64), (c) => c.charCodeAt(0));
+  const note = new TextEncoder().encode(`sd-fake-${++fakeShots}`);
+  const len = note.length + 2;
+  const out = new Uint8Array(jpeg.length + 2 + len);
+  out.set(jpeg.subarray(0, 2)); // SOI
+  out.set([0xff, 0xfe, len >> 8, len & 0xff], 2);
+  out.set(note, 6);
+  out.set(jpeg.subarray(2), 6 + note.length);
+  let bin = '';
+  for (const b of out) bin += String.fromCharCode(b);
+  return btoa(bin);
+}
 
 /**
  * The caller attaches the camera stream to `video`; the guide releases it in stop().
@@ -123,7 +151,7 @@ export function createGuide(video: HTMLVideoElement, mirrored = true): Guide {
         blinked: true,
         yaw: FAKE_YAWS[tick++ % FAKE_YAWS.length]!,
       }),
-      capture: async () => FAKE_JPEG,
+      capture: async () => fakeJpeg(),
       resetBlink: () => {},
       stop: () => {},
     };
@@ -192,7 +220,7 @@ export function createGuide(video: HTMLVideoElement, mirrored = true): Guide {
       );
       return state.kind === 'ready' ? { ...state, blinked: blink.blinked } : state;
     },
-    async capture(maxSide = 640, quality = 0.85) {
+    async capture(maxSide = CAPTURE_MAX_SIDE, quality = 0.85) {
       if (!video.videoWidth || !video.videoHeight) {
         throw new Error('camera not ready: video has no dimensions');
       }

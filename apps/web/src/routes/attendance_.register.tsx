@@ -10,7 +10,7 @@ import { FaceCapture } from '../attendance/FaceCapture';
 export const Route = createFileRoute('/attendance_/register')({ component: RegisterFace });
 
 const CONSENT =
-  "Site Diary keeps a numeric face code to confirm it's you at check-in. One photo is kept until a senior approves or rejects your registration, then deleted. To remove your face code, ask your company admin to request deletion from Site Diary support.";
+  "Site Diary keeps a numeric face code to confirm it's you at check-in. One photo is kept until a senior approves or rejects your registration, then deleted. To remove your face code, ask your company admin to request deletion from Site Diary support. If a check-in needs review, its photos are kept for the reviewer.";
 const SENT = 'Sent for approval. Ask your senior to approve it now.';
 
 const card = 'flex flex-col gap-3 rounded-[var(--r)] border border-line-soft bg-card p-4';

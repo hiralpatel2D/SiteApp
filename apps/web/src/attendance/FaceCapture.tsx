@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { REGISTRATION_FRAME_COUNT } from '@sitediary/shared';
+import { REGISTRATION_FRAME_COUNT, REGISTRATION_PHOTO_FRAME } from '@sitediary/shared';
 import { secondaryButton } from '../components/ui';
 import { createGuide, type Guide, type GuideState } from './face-guide';
 import {
@@ -18,16 +18,27 @@ import {
 
 type Ready = Extract<GuideState, { kind: 'ready' }>;
 
+const STRAIGHT_PROMPT = 'Look straight at the camera';
+
 /** The poses, in order, and how many frames each gives (5 in all). */
 const POSES: { prompt: string; ok: (s: Ready) => boolean; frames: number }[] = [
   { prompt: 'Blink once', ok: (s) => s.blinked, frames: 1 },
   { prompt: 'Turn your head left', ok: (s) => s.yaw === 'left', frames: 1 },
   { prompt: 'Turn your head right', ok: (s) => s.yaw === 'right', frames: 1 },
-  { prompt: 'Look straight at the camera', ok: (s) => s.yaw === 'centre', frames: 2 },
+  { prompt: STRAIGHT_PROMPT, ok: (s) => s.yaw === 'centre', frames: 2 },
 ];
 
-if (POSES.reduce((n, p) => n + p.frames, 0) !== REGISTRATION_FRAME_COUNT) {
+/** The pose prompt of each frame sent, in order. */
+export const FRAME_POSES: readonly string[] = POSES.flatMap((p) =>
+  Array.from({ length: p.frames }, () => p.prompt),
+);
+
+if (FRAME_POSES.length !== REGISTRATION_FRAME_COUNT) {
   throw new Error('POSES must add up to REGISTRATION_FRAME_COUNT frames');
+}
+// The server keeps frame REGISTRATION_PHOTO_FRAME for the approver: it must face the camera.
+if (FRAME_POSES[REGISTRATION_PHOTO_FRAME] !== STRAIGHT_PROMPT) {
+  throw new Error('REGISTRATION_PHOTO_FRAME must be a straight-ahead frame');
 }
 
 type Props = {

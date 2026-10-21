@@ -218,6 +218,29 @@ describe('Attendance admin and Home tile', () => {
     expect(await within(tile).findByText('Not set up for this project')).toBeTruthy();
   });
 
+  it.each([
+    ['none', 'Register your face'],
+    ['rejected', 'Register your face'],
+    ['pending', 'Face registration pending approval'],
+  ] as const)('tile with face status %s says %s', async (face, line) => {
+    setup(['projects.view', 'attendance.view'], {
+      [TODAY]: () => json(200, { setUp: true, face, checkIn: null, checkOut: null }),
+    });
+    renderAt('/home');
+    const tile = await screen.findByRole('link', { name: /Self Attendance/ });
+    expect(await within(tile).findByText(line)).toBeTruthy();
+    expect(tile.className).not.toContain('bg-good-bg');
+  });
+
+  it('tile with an approved face and nothing marked says Not checked in', async () => {
+    setup(['projects.view', 'attendance.view'], {
+      [TODAY]: () => json(200, { setUp: true, face: 'approved', checkIn: null, checkOut: null }),
+    });
+    renderAt('/home');
+    const tile = await screen.findByRole('link', { name: /Self Attendance/ });
+    expect(await within(tile).findByText('Not checked in')).toBeTruthy();
+  });
+
   it('settings refuses a location worse than 50 m', async () => {
     setup(['projects.view', 'attendance.settings'], {
       [`GET /api/attendance/settings/${P1}`]: () => json(200, { settings: null }),
@@ -422,7 +445,7 @@ describe('Register face', () => {
     renderAt('/attendance/register');
     expect(
       await screen.findByText(
-        "Site Diary keeps a numeric face code to confirm it's you at check-in. One photo is kept until a senior approves or rejects your registration, then deleted. To remove your face code, ask your company admin to request deletion from Site Diary support.",
+        "Site Diary keeps a numeric face code to confirm it's you at check-in. One photo is kept until a senior approves or rejects your registration, then deleted. To remove your face code, ask your company admin to request deletion from Site Diary support. If a check-in needs review, its photos are kept for the reviewer.",
       ),
     ).toBeTruthy();
     await userEvent.click(screen.getByRole('button', { name: 'I agree' }));

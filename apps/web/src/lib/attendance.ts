@@ -1,4 +1,4 @@
-import { api } from './api';
+import { api, ApiError } from './api';
 
 // Typed calls for /api/attendance (settings, face registration, check-in/out, review).
 
@@ -68,7 +68,7 @@ export type CheckResult = {
   projectName: string;
 };
 
-export type MatchResult = { matched: boolean; similarity: number | null };
+export type MatchResult = { matched: boolean };
 
 export type PendingFace = {
   id: string;
@@ -112,8 +112,26 @@ export const putSettings = (projectId: string, body: AttendanceSettingsInput) =>
     body,
   });
 
-/** Previews whether one frame matches the approved face. Records nothing. */
-export const matchFace = (frame: string) => api<MatchResult>(`${BASE}/match`, { body: { frame } });
+/** How long a face match may take before we give up and go back to guidance. */
+export const MATCH_TIMEOUT_MS = 20_000;
+export const MATCH_TOO_SLOW = 'Checking took too long. Try again.';
+
+/**
+ * Previews whether one frame matches the approved face. Records nothing. Gives up after
+ * MATCH_TIMEOUT_MS with a `timeout` ApiError carrying MATCH_TOO_SLOW.
+ */
+export async function matchFace(frame: string): Promise<MatchResult> {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), MATCH_TIMEOUT_MS);
+  try {
+    return await api<MatchResult>(`${BASE}/match`, { body: { frame }, signal: ctl.signal });
+  } catch (err) {
+    if (ctl.signal.aborted) throw new ApiError(0, 'timeout', MATCH_TOO_SLOW);
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 /** How long a check may take before we give up and offer Try again. */
 export const CHECK_TIMEOUT_MS = 30_000;

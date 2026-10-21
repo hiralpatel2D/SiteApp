@@ -70,7 +70,13 @@ const today = (over: Partial<Today> = {}): Today => ({
   ...over,
 });
 
-function setup(opts: { today?: Today; check?: () => Response } = {}) {
+function setup(
+  opts: {
+    today?: Today;
+    check?: () => Response;
+    match?: (init?: RequestInit) => Promise<Response>;
+  } = {},
+) {
   const posted: Record<string, unknown> = {};
   const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input instanceof Request ? input.url : input);
@@ -120,7 +126,8 @@ function setup(opts: { today?: Today; check?: () => Response } = {}) {
       );
     if (url.includes('/api/attendance/match')) {
       posted.match = JSON.parse(String(init?.body));
-      return Promise.resolve(json(200, { matched: true, similarity: 0.82 }));
+      posted.matchCalls = ((posted.matchCalls as number | undefined) ?? 0) + 1;
+      return opts.match ? opts.match(init) : Promise.resolve(json(200, { matched: true }));
     }
     if (url.includes('/api/attendance/check')) {
       posted.check = JSON.parse(String(init?.body));
@@ -315,6 +322,33 @@ describe('Attendance page', () => {
     });
     expect(screen.queryByText(/Hold still/)).toBeNull();
     expect(screen.getByText('Look at the camera')).toBeTruthy();
+    expect(guide.resetBlink).toHaveBeenCalled();
+    expect(posted.check).toBeUndefined();
+  });
+
+  it('gives up on a face check slower than 20 s and goes back to guidance', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const posted = setup({
+      match: (init) =>
+        new Promise((_, reject) =>
+          init?.signal?.addEventListener('abort', () =>
+            reject(new DOMException('aborted', 'AbortError')),
+          ),
+        ),
+    });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    renderAt('/attendance');
+    await user.click(await screen.findByRole('button', { name: 'Check in' }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(19_000);
+    });
+    expect(posted.matchCalls).toBe(1);
+    expect(screen.queryByText('Checking took too long. Try again.')).toBeNull();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_500);
+    });
+    expect(screen.getByText('Checking took too long. Try again.')).toBeTruthy();
+    expect(screen.queryByText(/Hold still/)).toBeNull();
     expect(guide.resetBlink).toHaveBeenCalled();
     expect(posted.check).toBeUndefined();
   });

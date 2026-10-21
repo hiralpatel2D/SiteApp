@@ -171,6 +171,10 @@ type TileStatus = { line: string; good?: boolean; pending?: boolean };
 /** Today's attendance in one line, from the latest of check-in and check-out. */
 function tileStatus(t: Today): TileStatus {
   if (!t.setUp) return { line: 'Not set up for this project' };
+  if (!t.checkIn && !t.checkOut) {
+    if (t.face === 'none' || t.face === 'rejected') return { line: 'Register your face' };
+    if (t.face === 'pending') return { line: 'Face registration pending approval' };
+  }
   const latest = t.checkOut
     ? { label: 'Checked out', e: t.checkOut }
     : t.checkIn

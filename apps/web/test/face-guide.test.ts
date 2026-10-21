@@ -1,5 +1,12 @@
-import { describe, expect, it } from 'vitest';
-import { createBlinkTracker, evaluateFrame, yawFromGestures } from '../src/attendance/face-guide';
+import { afterEach, describe, expect, it } from 'vitest';
+import {
+  CAPTURE_MAX_SIDE,
+  MIN_CAPTURE_FACE_PX,
+  createBlinkTracker,
+  createGuide,
+  evaluateFrame,
+  yawFromGestures,
+} from '../src/attendance/face-guide';
 
 const base = { videoW: 1000, videoH: 800, blink: false };
 // 400 wide (40%), centred at (500, 400).
@@ -51,6 +58,50 @@ describe('evaluateFrame', () => {
       kind: 'ready',
       yaw: 'left',
     });
+  });
+});
+
+describe('evaluateFrame face size in captured pixels', () => {
+  it('captures at most 640 px on the long side and needs a 176 px face', () => {
+    expect(CAPTURE_MAX_SIDE).toBe(640);
+    expect(MIN_CAPTURE_FACE_PX).toBe(176);
+  });
+  it('a portrait camera: 35% of 720 px is 126 px once scaled to 640 high, so move closer', () => {
+    const portrait = { videoW: 720, videoH: 1280, blink: false, faces: 1 };
+    expect(evaluateFrame({ ...portrait, box: [234, 514, 252, 252] })).toEqual({ kind: 'too-far' });
+    // 62% of 720 = 446 px → 223 px captured.
+    expect(evaluateFrame({ ...portrait, box: [137, 417, 446, 446] })).toMatchObject({
+      kind: 'ready',
+    });
+  });
+  it('a small 320×240 camera never scales up: 40% is 128 px, so move closer', () => {
+    const small = { videoW: 320, videoH: 240, blink: false, faces: 1 };
+    expect(evaluateFrame({ ...small, box: [96, 56, 128, 128] })).toEqual({ kind: 'too-far' });
+  });
+  it('a landscape 640×480 camera at 30% (192 px) is ready', () => {
+    const vga = { videoW: 640, videoH: 480, blink: false, faces: 1 };
+    expect(evaluateFrame({ ...vga, box: [224, 144, 192, 192] })).toMatchObject({ kind: 'ready' });
+  });
+});
+
+describe('fake guide (e2e)', () => {
+  afterEach(() => {
+    delete window.__SD_FAKE_FACE__;
+  });
+  const bytes = (b64: string) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+
+  it('captures a different, still valid JPEG every time', async () => {
+    window.__SD_FAKE_FACE__ = true;
+    const guide = createGuide(document.createElement('video'));
+    const shots = [await guide.capture(), await guide.capture(), await guide.capture()];
+    expect(new Set(shots).size).toBe(3);
+    for (const shot of shots) {
+      const b = bytes(shot);
+      expect([b[0], b[1], b[2], b[3]]).toEqual([0xff, 0xd8, 0xff, 0xfe]); // SOI, then a COM segment
+      expect([b[b.length - 2], b[b.length - 1]]).toEqual([0xff, 0xd9]);
+      const len = (b[4]! << 8) | b[5]!;
+      expect([b[4 + len], b[5 + len]]).toEqual([0xff, 0xe0]); // the original APP0 follows
+    }
   });
 });
 
@@ -107,5 +158,15 @@ describe('yawFromGestures', () => {
   });
   it('is centre otherwise', () => {
     expect(yawFromGestures(['blink left eye'], true)).toBe('centre');
+  });
+});
+
+describe('registration poses', () => {
+  it('the approver photo frame is a straight-ahead pose', async () => {
+    const { REGISTRATION_PHOTO_FRAME, REGISTRATION_FRAME_COUNT } =
+      await import('@sitediary/shared');
+    const { FRAME_POSES } = await import('../src/attendance/FaceCapture');
+    expect(FRAME_POSES).toHaveLength(REGISTRATION_FRAME_COUNT);
+    expect(FRAME_POSES[REGISTRATION_PHOTO_FRAME]).toBe('Look straight at the camera');
   });
 });
