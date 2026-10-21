@@ -1,0 +1,333 @@
+import { useEffect, useState } from 'react';
+import type { ReactNode } from 'react';
+import { Link, createFileRoute } from '@tanstack/react-router';
+import { distanceMeters } from '@sitediary/shared';
+import { ApiError, api, errorMessage } from '../lib/api';
+import {
+  getSettings,
+  getToday,
+  postCheck,
+  type AttendanceSettings,
+  type CheckKind,
+  type CheckResult,
+  type Today,
+  type TodayEntry,
+} from '../lib/attendance';
+import { getActiveProject, type Project } from '../lib/project';
+import { AppShell, useCan, useShell } from '../components/AppShell';
+import { Icon } from '../components/icons';
+import { Alert, Loading, primaryButton, secondaryButton } from '../components/ui';
+import { CameraCheck } from '../attendance/CameraCheck';
+
+export const Route = createFileRoute('/attendance')({ component: Attendance });
+
+const LOCATION_BLOCKED =
+  'Location is blocked. Allow location for this site in your browser settings.';
+const LOCATION_FAILED = 'Could not find your location. Step into the open and try again.';
+const NOT_SET_UP =
+  'Attendance is not set up for this project yet. Ask your admin to set the site location.';
+
+const card = 'flex flex-col gap-3 rounded-[var(--r)] border border-line-soft bg-card p-4';
+
+function Attendance() {
+  return (
+    <AppShell title="Self Attendance">
+      <AttendanceBody />
+    </AppShell>
+  );
+}
+
+/** Ruling R4: Home's active project, else the first active project. */
+function useProject(): { project: Project | null | undefined; error: string } {
+  const { ctx } = useShell();
+  const canSeeProjects = useCan('projects.view');
+  const [projects, setProjects] = useState<Project[] | null>(canSeeProjects ? null : []);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!canSeeProjects) return;
+    let live = true;
+    api<Project[]>('/api/projects').then(
+      (list) => live && setProjects(list.filter((p) => p.status === 'active')),
+      (err: unknown) => {
+        if (!live) return;
+        setProjects([]);
+        setError(errorMessage(err));
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [canSeeProjects]);
+
+  if (projects === null || !ctx) return { project: undefined, error };
+  const active = getActiveProject(ctx.company.id);
+  return { project: projects.find((p) => p.id === active) ?? projects[0] ?? null, error };
+}
+
+type Position = { lat: number; lng: number; accuracyM: number };
+
+type Step =
+  | { kind: 'idle' }
+  | { kind: 'locating' }
+  | { kind: 'camera'; pos: Position }
+  | { kind: 'sending' }
+  | { kind: 'done'; result: CheckResult }
+  | { kind: 'failed'; message: string };
+
+function AttendanceBody() {
+  const { project, error: projectError } = useProject();
+  const [today, setToday] = useState<Today | null>(null);
+  const [settings, setSettings] = useState<AttendanceSettings | null>(null);
+  const [loadError, setLoadError] = useState('');
+  const [step, setStep] = useState<Step>({ kind: 'idle' });
+  const [reload, setReload] = useState(0);
+
+  const projectId = project?.id;
+  useEffect(() => {
+    if (!projectId) return;
+    let live = true;
+    setLoadError('');
+    Promise.all([getToday(projectId), getSettings(projectId)]).then(
+      ([t, s]) => {
+        if (!live) return;
+        setToday(t);
+        setSettings(s.settings);
+      },
+      (err: unknown) => live && setLoadError(errorMessage(err)),
+    );
+    return () => {
+      live = false;
+    };
+  }, [projectId, reload]);
+
+  if (project === undefined) return <Loading />;
+  if (project === null) return projectError ? <Alert>{projectError}</Alert> : <NoProject />;
+
+  const kind: CheckKind = today?.checkIn ? 'check_out' : 'check_in';
+
+  function start() {
+    setStep({ kind: 'locating' });
+    if (!('geolocation' in navigator)) {
+      setStep({ kind: 'failed', message: LOCATION_FAILED });
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      (p) =>
+        setStep({
+          kind: 'camera',
+          pos: { lat: p.coords.latitude, lng: p.coords.longitude, accuracyM: p.coords.accuracy },
+        }),
+      (err) =>
+        setStep({
+          kind: 'failed',
+          message: err.code === 1 ? LOCATION_BLOCKED : LOCATION_FAILED, // 1 = PERMISSION_DENIED
+        }),
+      { enableHighAccuracy: true, timeout: 15000 },
+    );
+  }
+
+  async function submit(pos: Position, frames: string[]) {
+    setStep({ kind: 'sending' });
+    try {
+      const result = await postCheck({ projectId: project!.id, kind, ...pos, frames });
+      setStep({ kind: 'done', result });
+    } catch (err) {
+      if (err instanceof ApiError && err.code === 'attendance_not_set_up') {
+        setToday((t) => (t ? { ...t, setUp: false } : t));
+        setStep({ kind: 'idle' });
+        return;
+      }
+      if (err instanceof ApiError && err.code === 'face_not_registered') {
+        setStep({ kind: 'idle' });
+        setReload((n) => n + 1);
+        return;
+      }
+      setStep({ kind: 'failed', message: errorMessage(err) });
+    }
+  }
+
+  function finish() {
+    setStep({ kind: 'idle' });
+    setReload((n) => n + 1);
+  }
+
+  let body: ReactNode;
+  if (loadError) body = <Alert>{loadError}</Alert>;
+  else if (!today) body = <Loading />;
+  else if (!today.setUp) body = <Card>{NOT_SET_UP}</Card>;
+  else if (today.face !== 'approved') body = <FaceCard face={today.face} />;
+  else if (step.kind === 'done') body = <Confirmation result={step.result} onDone={finish} />;
+  else if (step.kind === 'failed')
+    body = (
+      <div className={card}>
+        <p role="alert" className="font-medium">
+          {step.message}
+        </p>
+        <button type="button" className={primaryButton} onClick={start}>
+          Try again
+        </button>
+        <button type="button" className={secondaryButton} onClick={finish}>
+          Back
+        </button>
+      </div>
+    );
+  else if (step.kind === 'camera')
+    body = (
+      <div className="flex flex-col gap-3">
+        <Distance pos={step.pos} settings={settings} />
+        <CameraCheck
+          onCaptured={(frames) => void submit(step.pos, frames)}
+          onError={(message) => setStep({ kind: 'failed', message })}
+          onCancel={() => setStep({ kind: 'idle' })}
+        />
+      </div>
+    );
+  else if (step.kind === 'locating') body = <Loading>Finding your location…</Loading>;
+  else if (step.kind === 'sending') body = <Loading>Saving…</Loading>;
+  else body = <Status today={today} kind={kind} onStart={start} />;
+
+  return (
+    <div className="flex flex-col gap-4">
+      <p className="font-display text-[22px] font-extrabold uppercase leading-tight">
+        {project.name}
+      </p>
+      {body}
+    </div>
+  );
+}
+
+const timeOf = (iso: string) =>
+  new Date(iso).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+
+function Card({ children }: { children: ReactNode }) {
+  return (
+    <div className={card}>
+      <p className="font-medium">{children}</p>
+    </div>
+  );
+}
+
+function NoProject() {
+  return (
+    <div className={card}>
+      <h2 className="font-display text-[24px] font-extrabold uppercase">No project yet</h2>
+      <p className="text-muted">Attendance works per project. Add or join a project first.</p>
+      <Link to="/projects" className={`${primaryButton} grid place-items-center`}>
+        Go to projects
+      </Link>
+    </div>
+  );
+}
+
+function FaceCard({ face }: { face: Today['face'] }) {
+  if (face === 'pending') {
+    return <Card>Your face registration is waiting for approval by a senior.</Card>;
+  }
+  return (
+    <div className={card}>
+      <p className="font-medium">
+        {face === 'rejected'
+          ? 'Your face registration was not approved. Register again to check in.'
+          : 'Register your face once before your first check-in.'}
+      </p>
+      {/* The registration page arrives with the next task; a plain link keeps routing typed. */}
+      <a href="/attendance/register" className={`${primaryButton} grid place-items-center`}>
+        Register your face
+      </a>
+    </div>
+  );
+}
+
+function entryLine(label: string, e: TodayEntry): string {
+  const extra = e.status === 'pending' ? ' · waiting for approval' : '';
+  return `${label} at ${timeOf(e.at)}${extra}`;
+}
+
+function Status({ today, kind, onStart }: { today: Today; kind: CheckKind; onStart: () => void }) {
+  const done = today.checkIn && today.checkOut;
+  return (
+    <div className="flex flex-col gap-4">
+      {(today.checkIn || today.checkOut) && (
+        <ul className={`${card} gap-1`} aria-label="Today">
+          {today.checkIn && <li>{entryLine('Checked in', today.checkIn)}</li>}
+          {today.checkOut && <li>{entryLine('Checked out', today.checkOut)}</li>}
+        </ul>
+      )}
+      {done ? (
+        <div className="flex flex-col items-center gap-2 rounded-[var(--r)] bg-good-bg p-6 text-center">
+          <span className="text-good">
+            <Tick />
+          </span>
+          <p className="font-display text-[28px] font-extrabold uppercase">Done for today</p>
+        </div>
+      ) : (
+        <button type="button" onClick={onStart} className={`${primaryButton} h-[72px] text-[26px]`}>
+          {kind === 'check_in' ? 'Check in' : 'Check out'}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function Distance({ pos, settings }: { pos: Position; settings: AttendanceSettings | null }) {
+  if (!settings) return null;
+  const d = Math.round(distanceMeters(pos, settings));
+  return (
+    <p className="flex items-center gap-2 text-muted">
+      <Icon name="pin" size={18} />
+      {`${d} m from site · ±${Math.round(pos.accuracyM)} m`}
+    </p>
+  );
+}
+
+function Confirmation({ result, onDone }: { result: CheckResult; onDone: () => void }) {
+  const verb = result.kind === 'check_in' ? 'Checked in' : 'Checked out';
+  const line = `${verb} at ${timeOf(result.at)} · ${result.projectName} · ${Math.round(result.distanceM)} m from site`;
+  const pending = result.status === 'pending';
+  return (
+    <div className="flex flex-col gap-4">
+      <div
+        className={`flex flex-col items-center gap-3 rounded-[var(--r)] p-6 text-center ${pending ? 'border border-line bg-card' : 'bg-good-bg'}`}
+      >
+        <span className={pending ? 'text-warn' : 'text-good'}>
+          {pending ? <Icon name="clock" size={64} /> : <Tick />}
+        </span>
+        {pending && (
+          <p className="font-display text-[28px] font-extrabold uppercase">Sent for approval</p>
+        )}
+        <p className="text-[17px] font-medium">{line}</p>
+        {result.lateMin > 0 && <p className="font-medium">{`Late by ${result.lateMin} min`}</p>}
+        {pending && result.reasons.length > 0 && (
+          <ul aria-label="Reasons" className="list-disc self-stretch pl-6 text-left">
+            {result.reasons.map((r) => (
+              <li key={r}>{r}</li>
+            ))}
+          </ul>
+        )}
+      </div>
+      <button type="button" className={secondaryButton} onClick={onDone}>
+        Done
+      </button>
+    </div>
+  );
+}
+
+function Tick() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width="64"
+      height="64"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <circle cx="12" cy="12" r="10" />
+      <path d="M7.5 12.5l3 3 6-6.5" />
+    </svg>
+  );
+}
