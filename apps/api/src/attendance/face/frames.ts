@@ -2,14 +2,14 @@ import type { FaceEngine, FaceReading } from './types';
 
 /**
  * Two frames whose 32×32 greyscale downscales differ by less than this mean absolute
- * difference (on 0..255) are near-identical: a replayed photo, not a live person. Live
- * selfies differ by well over this between frames (hand shake, blinking, head turn,
- * sensor noise); a re-encoded copy of one photo differs by well under 1.
+ * difference (on 0..255) are near-identical: one picture sent twice, not a live person.
+ * Measured basis: re-encodes of the same picture score well below 1.0, while a 1 px hand
+ * shake between two live frames already scores 1.3–2.0, so 1.0 sits between the two.
+ *
+ * There is deliberately no embedding-based rule: faceSimilarity saturates at 1.00 for any
+ * raw distance up to about 4, which genuine same-person frames 250 ms apart often reach.
  */
-export const NEAR_IDENTICAL_MAD = 2.0;
-
-/** Every pair of embeddings at least this similar means the frames are one photo replayed. */
-export const IDENTICAL_EMBEDDING_MIN = 0.999;
+export const NEAR_IDENTICAL_MAD = 1.0;
 
 /** Frames of one check must be the same person: every pair at least this similar. */
 export const SAME_PERSON_MIN = 0.5;
@@ -29,14 +29,10 @@ function pairs(n: number): [number, number][] {
 }
 
 /**
- * False when the frames look replayed: any two byte-identical, any two near-identical
- * (downscale MAD < NEAR_IDENTICAL_MAD), or every pair of embeddings ≥ IDENTICAL_EMBEDDING_MIN.
+ * False when the frames look replayed: any two byte-identical, or any two near-identical
+ * (downscale MAD < NEAR_IDENTICAL_MAD). Embeddings are not used (see NEAR_IDENTICAL_MAD).
  */
-export function framesDistinct(
-  jpegs: Buffer[],
-  readings: FaceReading[],
-  engine: FaceEngine,
-): boolean {
+export function framesDistinct(jpegs: Buffer[], readings: FaceReading[]): boolean {
   const idx = pairs(jpegs.length);
   if (idx.some(([i, j]) => jpegs[i]!.equals(jpegs[j]!))) return false;
   const near = idx.some(([i, j]) => {
@@ -44,15 +40,7 @@ export function framesDistinct(
     const b = readings[j]?.thumb;
     return a && b ? meanAbsDiff(a, b) < NEAR_IDENTICAL_MAD : false;
   });
-  if (near) return false;
-  const embs = readings.map((r) => r.embedding);
-  if (embs.length >= 2 && embs.every((e) => e !== null)) {
-    const same = pairs(embs.length).every(
-      ([i, j]) => engine.similarity(embs[i]!, embs[j]!) >= IDENTICAL_EMBEDDING_MIN,
-    );
-    if (same) return false;
-  }
-  return true;
+  return !near;
 }
 
 /** True when every frame has an embedding and every pair is the same person (≥ SAME_PERSON_MIN). */

@@ -134,7 +134,7 @@ function faceSignals(
     real: Math.min(...readings.map((r) => r.real)),
     live: Math.min(...readings.map((r) => r.live)),
     framesAgree: framesAgree(readings, engine),
-    framesDistinct: framesDistinct(jpegs, readings, engine),
+    framesDistinct: framesDistinct(jpegs, readings),
   };
 }
 

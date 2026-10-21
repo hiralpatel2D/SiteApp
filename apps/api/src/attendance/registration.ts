@@ -44,7 +44,7 @@ const identical = () =>
   new AppError(
     422,
     'frames_identical',
-    'Hold the phone steady and try again — the photos looked identical.',
+    'Move slightly and try again — the photos looked identical.',
   );
 
 const isClear = (r: FaceReading, minLiveness: number) =>
@@ -115,7 +115,7 @@ export function registrationRoutes({ config, faceEngine }: RegistrationDeps): Ho
       for (const jpeg of jpegs) readings.push(await faceEngine.read(jpeg));
       if (!readings.every((x) => isClear(x, config.faceThresholds.minLiveness))) throw notClear();
       // A replayed photo (or one photo sent five times) is not a live registration.
-      if (!framesDistinct(jpegs, readings, faceEngine)) throw identical();
+      if (!framesDistinct(jpegs, readings)) throw identical();
       const embeddings = readings.map((x) => x.embedding!);
       for (let i = 0; i < embeddings.length; i++) {
         for (let j = i + 1; j < embeddings.length; j++) {

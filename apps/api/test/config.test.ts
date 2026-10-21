@@ -166,6 +166,15 @@ describe('loadConfig', () => {
       expect(
         loadConfig({ ...base, FACE_MATCH_MIN: '0.62', FACE_LIVENESS_MIN: '0.7' }).faceThresholds,
       ).toEqual({ minSimilarity: 0.62, minLiveness: 0.7 }));
+    it('trims, and treats whitespace-only as unset', () => {
+      expect(
+        loadConfig({ ...base, FACE_MATCH_MIN: ' 0.55 ', FACE_LIVENESS_MIN: '\t0.65\n' })
+          .faceThresholds,
+      ).toEqual({ minSimilarity: 0.55, minLiveness: 0.65 });
+      expect(
+        loadConfig({ ...base, FACE_MATCH_MIN: '   ', FACE_LIVENESS_MIN: ' ' }).faceThresholds,
+      ).toEqual({ minSimilarity: 0.5, minLiveness: 0.6 });
+    });
     it.each(['-0.1', '1.01', 'abc'])('rejects FACE_MATCH_MIN=%s', (v) =>
       expect(() => loadConfig({ ...base, FACE_MATCH_MIN: v })).toThrow('FACE_MATCH_MIN'),
     );

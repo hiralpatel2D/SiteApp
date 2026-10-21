@@ -37,24 +37,26 @@ describe('framesDistinct (replay check)', () => {
   const embs = [1, 2, 3].map((n) => fakeEmbedding(Buffer.from([n])));
   const ok = [0, 1, 2].map((i) => reading({ thumb: thumb(i * 10), embedding: embs[i]! }));
 
-  it('passes distinct frames', () => expect(framesDistinct(jpegs(1, 2, 3), ok, engine)).toBe(true));
+  it('passes distinct frames', () => expect(framesDistinct(jpegs(1, 2, 3), ok)).toBe(true));
 
   it('fails when two frames are byte-identical', () =>
-    expect(framesDistinct(jpegs(1, 1, 3), ok, engine)).toBe(false));
+    expect(framesDistinct(jpegs(1, 1, 3), ok)).toBe(false));
 
   it(`fails when two downscaled frames differ by less than ${NEAR_IDENTICAL_MAD} on average`, () => {
-    const near = [ok[0]!, { ...ok[1]!, thumb: thumb(1) }, ok[2]!];
-    expect(framesDistinct(jpegs(1, 2, 3), near, engine)).toBe(false);
-    const apart = [ok[0]!, { ...ok[1]!, thumb: thumb(NEAR_IDENTICAL_MAD) }, ok[2]!];
-    expect(framesDistinct(jpegs(1, 2, 3), apart, engine)).toBe(true);
+    expect(NEAR_IDENTICAL_MAD).toBe(1);
+    // Every other pixel one level brighter than frame 0: MAD 0.5.
+    const half = Uint8Array.from({ length: 1024 }, (_, i) => i % 2);
+    const near = [ok[0]!, { ...ok[1]!, thumb: half }, ok[2]!];
+    expect(framesDistinct(jpegs(1, 2, 3), near)).toBe(false);
+    // MAD exactly 1.0 (a 1 px hand shake measures 1.3-2.0) is not flagged.
+    const apart = [ok[0]!, { ...ok[1]!, thumb: thumb(1) }, ok[2]!];
+    expect(framesDistinct(jpegs(1, 2, 3), apart)).toBe(true);
   });
 
-  it('fails when every pair of embeddings is (near) identical', () => {
+  it('does not flag different images whose embeddings are (near) identical', () => {
+    // Real same-person frames 250 ms apart often score 1.00 (the similarity saturates).
     const same = ok.map((r) => ({ ...r, embedding: [...FAKE_EMBEDDING] }));
-    expect(framesDistinct(jpegs(1, 2, 3), same, engine)).toBe(false);
-    // One pair that differs is enough to pass the embedding rule.
-    const mixed = [ok[0]!, ok[1]!, same[2]!];
-    expect(framesDistinct(jpegs(1, 2, 3), mixed, engine)).toBe(true);
+    expect(framesDistinct(jpegs(1, 2, 3), same)).toBe(true);
   });
 });
 
@@ -94,7 +96,7 @@ describe('fake engine readings', () => {
         expect(meanAbsDiff(reads[i]!.thumb!, reads[j]!.thumb!)).toBeGreaterThan(NEAR_IDENTICAL_MAD);
       }
     }
-    expect(framesDistinct(jpegs(1, 2, 3), reads.slice(0, 3), engine)).toBe(true);
+    expect(framesDistinct(jpegs(1, 2, 3), reads.slice(0, 3))).toBe(true);
     expect(framesAgree(reads, engine)).toBe(true);
   });
 

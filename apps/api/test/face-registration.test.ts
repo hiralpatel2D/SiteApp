@@ -157,12 +157,10 @@ describe('face registration', () => {
     ['byte-identical photos', {}, [1, 2, 3, 2, 5]],
     [
       'near-identical photos',
-      { 2: { thumb: new Uint8Array(1024).fill(50) }, 4: { thumb: new Uint8Array(1024).fill(51) } },
-      [1, 2, 3, 4, 5],
-    ],
-    [
-      'photos with identical embeddings',
-      Object.fromEntries([1, 2, 3, 4, 5].map((n) => [n, { embedding: [...FAKE_EMBEDDING] }])),
+      {
+        2: { thumb: new Uint8Array(1024).fill(50) },
+        4: { thumb: Uint8Array.from({ length: 1024 }, (_, i) => 50 + (i % 2)) },
+      },
       [1, 2, 3, 4, 5],
     ],
   ] as const)('rejects %s as frames_identical', async (_, readings, nums) => {
@@ -171,9 +169,16 @@ describe('face registration', () => {
     expect(res.status).toBe(422);
     expect(await errorOf(res)).toEqual({
       code: 'frames_identical',
-      message: 'Hold the phone steady and try again — the photos looked identical.',
+      message: 'Move slightly and try again — the photos looked identical.',
     });
     expect(await rows()).toHaveLength(0);
+  });
+
+  it('accepts different photos whose embeddings are identical', async () => {
+    const ctx = await setup(
+      Object.fromEntries([1, 2, 3, 4, 5].map((n) => [n, { embedding: [...FAKE_EMBEDDING] }])),
+    );
+    expect((await register(ctx, ctx.worker.cookie)).status).toBe(200);
   });
 
   it('uses FACE_LIVENESS_MIN from config for the photos', async () => {

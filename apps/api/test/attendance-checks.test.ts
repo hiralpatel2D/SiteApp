@@ -416,14 +416,14 @@ describe('attendance check-in / check-out', () => {
     const ctx = await setup({
       readings: {
         1: { thumb: new Uint8Array(1024).fill(100) },
-        3: { thumb: new Uint8Array(1024).fill(101) },
+        3: { thumb: Uint8Array.from({ length: 1024 }, (_, i) => 100 + (i % 2)) },
       },
     });
     const body = (await (await check(ctx, 'check_in')).json()) as CheckResult;
     expect(body.reasons).toEqual(['Liveness failed']);
   });
 
-  it('frames whose embeddings are all identical are pending as Liveness failed', async () => {
+  it('different photos whose embeddings are all identical still record', async () => {
     const ctx = await setup({
       readings: {
         1: { embedding: EMBEDDING },
@@ -432,7 +432,7 @@ describe('attendance check-in / check-out', () => {
       },
     });
     const body = (await (await check(ctx, 'check_in')).json()) as CheckResult;
-    expect(body.reasons).toEqual(['Liveness failed']);
+    expect(body).toMatchObject({ status: 'recorded', reasons: [] });
   });
 
   it('uses FACE_MATCH_MIN and FACE_LIVENESS_MIN from config', async () => {

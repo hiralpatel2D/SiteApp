@@ -128,8 +128,14 @@ function loadFaceTemplateKey(raw: string | undefined, nodeEnv: Config['nodeEnv']
 }
 
 export function loadConfig(env: Record<string, string | undefined>): Config {
-  // Treat empty strings as unset so defaults apply.
-  const cleaned = Object.fromEntries(Object.entries(env).filter(([, v]) => v !== ''));
+  // Treat empty strings as unset so defaults apply; the face thresholds are also trimmed,
+  // so a whitespace-only value is unset too (not coerced to 0).
+  const trimmed = new Set(['FACE_MATCH_MIN', 'FACE_LIVENESS_MIN']);
+  const cleaned = Object.fromEntries(
+    Object.entries(env)
+      .map(([k, v]) => [k, trimmed.has(k) ? v?.trim() : v] as const)
+      .filter(([, v]) => v !== ''),
+  );
   const result = schema.safeParse(cleaned);
   if (!result.success) {
     const name = String(result.error.issues[0]?.path[0] ?? 'environment');
