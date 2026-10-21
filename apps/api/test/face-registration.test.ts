@@ -12,7 +12,8 @@ import {
 import { createFakeEngine, FAKE_EMBEDDING, fakeEmbedding } from '../src/attendance/face/fake';
 import type { FaceReading } from '../src/attendance/face/types';
 import type { Config } from '../src/config';
-import { ownerDb, useTestDb } from './helpers/db';
+import { cfg, ownerDb, useTestDb } from './helpers/db';
+import { decryptTemplate } from '../src/attendance/face/template';
 import { req, seedMember, testApp } from './helpers/auth';
 
 useTestDb();
@@ -102,6 +103,12 @@ describe('face registration', () => {
     expect(REGISTRATION_PHOTO_FRAME).toBe(3);
     expect(row!.photo!.toString('base64')).toBe(frames()[REGISTRATION_PHOTO_FRAME]);
     expect(row!.modelVersion).toBe('fake');
+    // The template is the raw mean of the frame embeddings, in the engine's own space.
+    const template = decryptTemplate(row!.template, cfg.faceTemplateKey);
+    const embs = frames().map((f) => fakeEmbedding(Buffer.from(f, 'base64')));
+    template.forEach((v, i) =>
+      expect(v).toBeCloseTo(embs.reduce((sum, e) => sum + e[i]!, 0) / embs.length, 5),
+    );
     const audits = await ownerDb
       .select()
       .from(auditLog)

@@ -37,13 +37,15 @@ export function decryptTemplate(blob: Buffer, key: Buffer): number[] {
   return out;
 }
 
-/** Element-wise mean of equal-length embeddings, then L2-normalised. */
+/**
+ * Element-wise mean of equal-length embeddings, with NO normalisation. Human's faceres
+ * descriptors are not unit length (L2 norms of about 4–8) and its similarity is distance
+ * based, so the template must stay in the same raw space as the frames it is compared with,
+ * as in Human's own faceid demo.
+ */
 export function averageEmbedding(list: number[][]): number[] {
   const first = list[0];
   if (!first || first.length === 0) throw new Error('No embeddings to average');
   if (list.some((e) => e.length !== first.length)) throw new Error('Embedding lengths differ');
-  const mean = first.map((_, i) => list.reduce((s, e) => s + e[i]!, 0) / list.length);
-  const norm = Math.sqrt(mean.reduce((s, v) => s + v * v, 0));
-  if (norm === 0) throw new Error('Embeddings average to zero');
-  return mean.map((v) => v / norm);
+  return first.map((_, i) => list.reduce((s, e) => s + e[i]!, 0) / list.length);
 }
