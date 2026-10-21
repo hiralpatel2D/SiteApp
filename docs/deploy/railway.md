@@ -57,6 +57,8 @@ Both services use the GitHub repo `hiralpatel2D/SiteApp`, branch `main`, root di
 | `BOOTSTRAP_OWNER_EMAIL`    | Optional, see **First owner login**. The owner's email; it must also be in `PLATFORM_ADMIN_EMAILS`. |
 | `BOOTSTRAP_OWNER_PASSWORD` | Optional, see **First owner login**. A temporary password (at least 8 characters). Delete it after the first sign-in. |
 | `FACE_TEMPLATE_KEY`        | Required: from the attendance release onwards `api` **will not start** in production without it, so add it before deploying. A random 32-byte key, base64-encoded, that encrypts the stored face templates used for attendance. Generate it with `openssl rand -base64 32` and use a different one in each environment. **Never change or lose it**: templates saved with the old key can no longer be read, and every worker would have to enrol again. |
+| `FACE_MATCH_MIN`           | Optional, default `0.50`. The lowest face match score (0 to 1) that records a check-in; lower scores go to Pending as "Face not matched". Raise it if a colleague is ever recorded as someone else. |
+| `FACE_LIVENESS_MIN`        | Optional, default `0.60`. The lowest anti-spoof and liveness score (0 to 1), taken from the weakest of the three photos; lower scores go to Pending as "Liveness failed". Raise it if a printed or on-screen photo is ever recorded. |
 
 **`web` service**
 
@@ -75,6 +77,8 @@ Type the `${{ ... }}` parts exactly. Railway fills them in itself, and in each e
 - **Nothing to download or upload for the face models.** They ship inside the build: the server's with `api`, the phone's with `web`.
 - **The first check-in on each phone is slower.** It loads the face library (about 1.5 MB of JavaScript plus about 4.5 MB of models) once; after that the phone keeps it cached. On a weak site signal, do the first check-in on Wi-Fi if possible.
 - Give `api` about **350 MB** of memory (see **Memory** above).
+- **Spoof test before inviting staff (go-live gate).** On a real phone, with a registered and approved person: try to check in by holding up (1) a printed photo of that person and (2) their photo or video replayed on another phone's screen. **Both must go to Pending, never Recorded.** Write down the date, the phones used and the result of each try (Recorded or Pending, and the reasons shown) in the release notes. If either is recorded, raise `FACE_LIVENESS_MIN` (and if needed `FACE_MATCH_MIN`), redeploy and repeat before anyone is invited.
+- **Known limit (Stage A).** The phone, not the server, picks the head-turn prompts. Someone with a stolen sign-in and genuine old selfies of a colleague could write a script that gets a check-in recorded. Reviewers can see every entry and its audit trail, and every face is approved by a senior; Stage B adds a server-issued challenge.
 
 ## First owner login
 
