@@ -318,7 +318,7 @@ export const attendanceSettings = pgTable(
       name: 'attendance_settings_project_fk',
       columns: [t.companyId, t.projectId],
       foreignColumns: [projects.companyId, projects.id],
-    }).onDelete('cascade'),
+    }).onDelete('restrict'),
   ],
 );
 
@@ -345,7 +345,7 @@ export const faceRegistrations = pgTable(
       name: 'face_registrations_membership_fk',
       columns: [t.companyId, t.membershipId],
       foreignColumns: [memberships.companyId, memberships.id],
-    }).onDelete('cascade'),
+    }).onDelete('restrict'),
     uniqueIndex('face_registrations_one_approved')
       .on(t.membershipId)
       .where(sql`${t.status} = 'approved'`),
@@ -394,12 +394,12 @@ export const attendanceEntries = pgTable(
       name: 'attendance_entries_membership_fk',
       columns: [t.companyId, t.membershipId],
       foreignColumns: [memberships.companyId, memberships.id],
-    }).onDelete('cascade'),
+    }).onDelete('restrict'),
     foreignKey({
       name: 'attendance_entries_project_fk',
       columns: [t.companyId, t.projectId],
       foreignColumns: [projects.companyId, projects.id],
-    }).onDelete('cascade'),
+    }).onDelete('restrict'),
     uniqueIndex('attendance_entries_one_per_day')
       .on(t.membershipId, t.workDate, t.kind)
       .where(sql`${t.status} <> 'rejected'`),

@@ -47,6 +47,52 @@ const entry = (companyId: string, membershipId: string, projectId: string, kind 
 });
 
 describe('attendance schema', () => {
+  it('refuses to delete a project or membership that has attendance history (no cascade)', async () => {
+    const { a } = await seedTwoCompanies();
+    const sa = await seedCompany(a);
+    await ownerDb.insert(attendanceSettings).values({
+      companyId: a,
+      projectId: sa.projectId,
+      lat: 1,
+      lng: 2,
+      radiusM: 100,
+      startTime: '09:00',
+      lateAfterMin: 15,
+      reminderTime: '08:30',
+    });
+    await ownerDb.insert(faceRegistrations).values({
+      companyId: a,
+      membershipId: sa.membershipId,
+      status: 'approved',
+      template: Buffer.from([1, 2, 3]),
+      modelVersion: 'v1',
+      consentAt: new Date(),
+    });
+    await ownerDb.insert(attendanceEntries).values(entry(a, sa.membershipId, sa.projectId));
+    const fkOf = (sql: string, id: string) =>
+      owner.query(sql, [id]).then(
+        () => null,
+        (e: { code?: string; constraint?: string }) => [e.code, e.constraint],
+      );
+    expect(await fkOf('delete from projects where id = $1', sa.projectId)).toEqual([
+      '23503',
+      expect.stringMatching(/^attendance_(entries|settings)_project_fk$/),
+    ]);
+    expect(await fkOf('delete from memberships where id = $1', sa.membershipId)).toEqual([
+      '23503',
+      expect.stringMatching(/^(attendance_entries|face_registrations)_membership_fk$/),
+    ]);
+    await owner.query('delete from attendance_entries');
+    expect(await fkOf('delete from projects where id = $1', sa.projectId)).toEqual([
+      '23503',
+      'attendance_settings_project_fk',
+    ]);
+    expect(await fkOf('delete from memberships where id = $1', sa.membershipId)).toEqual([
+      '23503',
+      'face_registrations_membership_fk',
+    ]);
+  });
+
   it('isolates all three tables by tenant', async () => {
     const { a, b } = await seedTwoCompanies();
     const sa = await seedCompany(a);

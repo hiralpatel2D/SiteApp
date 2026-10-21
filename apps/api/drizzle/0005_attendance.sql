@@ -68,12 +68,12 @@ CREATE TABLE "face_registrations" (
 );
 --> statement-breakpoint
 ALTER TABLE "attendance_entries" ADD CONSTRAINT "attendance_entries_company_id_companies_id_fk" FOREIGN KEY ("company_id") REFERENCES "public"."companies"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "attendance_entries" ADD CONSTRAINT "attendance_entries_membership_fk" FOREIGN KEY ("company_id","membership_id") REFERENCES "public"."memberships"("company_id","id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "attendance_entries" ADD CONSTRAINT "attendance_entries_project_fk" FOREIGN KEY ("company_id","project_id") REFERENCES "public"."projects"("company_id","id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "attendance_entries" ADD CONSTRAINT "attendance_entries_membership_fk" FOREIGN KEY ("company_id","membership_id") REFERENCES "public"."memberships"("company_id","id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "attendance_entries" ADD CONSTRAINT "attendance_entries_project_fk" FOREIGN KEY ("company_id","project_id") REFERENCES "public"."projects"("company_id","id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "attendance_settings" ADD CONSTRAINT "attendance_settings_company_id_companies_id_fk" FOREIGN KEY ("company_id") REFERENCES "public"."companies"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "attendance_settings" ADD CONSTRAINT "attendance_settings_project_fk" FOREIGN KEY ("company_id","project_id") REFERENCES "public"."projects"("company_id","id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "attendance_settings" ADD CONSTRAINT "attendance_settings_project_fk" FOREIGN KEY ("company_id","project_id") REFERENCES "public"."projects"("company_id","id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "face_registrations" ADD CONSTRAINT "face_registrations_company_id_companies_id_fk" FOREIGN KEY ("company_id") REFERENCES "public"."companies"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "face_registrations" ADD CONSTRAINT "face_registrations_membership_fk" FOREIGN KEY ("company_id","membership_id") REFERENCES "public"."memberships"("company_id","id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "face_registrations" ADD CONSTRAINT "face_registrations_membership_fk" FOREIGN KEY ("company_id","membership_id") REFERENCES "public"."memberships"("company_id","id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
 CREATE UNIQUE INDEX "attendance_entries_one_per_day" ON "attendance_entries" USING btree ("membership_id","work_date","kind") WHERE "attendance_entries"."status" <> 'rejected';--> statement-breakpoint
 CREATE UNIQUE INDEX "face_registrations_one_approved" ON "face_registrations" USING btree ("membership_id") WHERE "face_registrations"."status" = 'approved';--> statement-breakpoint
 CREATE UNIQUE INDEX "face_registrations_one_pending" ON "face_registrations" USING btree ("membership_id") WHERE "face_registrations"."status" = 'pending';
