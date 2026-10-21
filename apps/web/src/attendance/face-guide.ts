@@ -102,6 +102,8 @@ declare global {
   }
 }
 
+const FAKE_YAWS: readonly Yaw[] = ['centre', 'left', 'right'];
+
 // 8x8 grey JPEG, raw base64.
 const FAKE_JPEG =
   '/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDABALDA4MChAODQ4SERATGCgaGBYWGDEjJR0oOjM9PDkzODdASFxOQERXRTc4UG1RV19iZ2hnPk1xeXBkeFxlZ2P/2wBDARESEhgVGC8aGi9jQjhCY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2P/wAARCAAIAAgDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwAooooA/9k=';
@@ -113,8 +115,14 @@ const FAKE_JPEG =
  */
 export function createGuide(video: HTMLVideoElement, mirrored = true): Guide {
   if (typeof window !== 'undefined' && window.__SD_FAKE_FACE__) {
+    // Cycles centre → left → right so registration's head-turn poses are met too.
+    let tick = 0;
     return {
-      next: async () => ({ kind: 'ready', blinked: true, yaw: 'centre' }),
+      next: async () => ({
+        kind: 'ready',
+        blinked: true,
+        yaw: FAKE_YAWS[tick++ % FAKE_YAWS.length]!,
+      }),
       capture: async () => FAKE_JPEG,
       resetBlink: () => {},
       stop: () => {},

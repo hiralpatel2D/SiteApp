@@ -68,6 +68,14 @@ Type the `${{ ... }}` parts exactly. Railway fills them in itself, and in each e
 
 **Memory.** Face recognition for attendance runs inside `api`, so the `api` service needs about **350 MB** of memory. Check its memory limit in the service settings. The face models load on the first attendance photo, which takes under a second.
 
+## Attendance go-live checklist
+
+- **Set `FACE_TEMPLATE_KEY` on `api` before deploying** the attendance release (see **Variables**). Without it `api` will not start.
+- **Never set `API_FACE_ENGINE`** in production. It exists only for automated tests (`fake` skips real face checks), and `api` refuses to start in production with `API_FACE_ENGINE=fake`.
+- **Nothing to download or upload for the face models.** They ship inside the build: the server's with `api`, the phone's with `web`.
+- **The first check-in on each phone is slower.** It loads the face library (about 1.5 MB of JavaScript plus about 4.5 MB of models) once; after that the phone keeps it cached. On a weak site signal, do the first check-in on Wi-Fi if possible.
+- Give `api` about **350 MB** of memory (see **Memory** above).
+
 ## First owner login
 
 Instead of using the **Create owner account** page, the `api` service can create the owner's account for you when it starts.
