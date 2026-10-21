@@ -9,6 +9,9 @@ export const CAMERA_BLOCKED =
   'Camera is blocked. Allow camera for this site in your browser settings.';
 const CAMERA_FAILED = 'The camera could not start. Close other apps using it and try again.';
 const NOT_RECOGNISED = 'Face not recognised. Try again in better light.';
+const GUIDE_FAILED = 'The face check could not start. Check your connection and try again.';
+/** Consecutive guide.next() failures before giving up (models failed to load, etc.). */
+const MAX_GUIDE_FAILURES = 20;
 
 const HOLD_MS = 3000;
 const TICK_MS = 100;
@@ -84,9 +87,14 @@ export function CameraCheck({ onCaptured, onError, onCancel }: Props) {
       } catch {
         // Autoplay of a muted inline video is allowed; ignore odd browsers.
       }
+      if (!live) {
+        stream.getTracks().forEach((t) => t.stop());
+        return;
+      }
       guide = createGuide(video);
       let lastMatch = -Infinity;
       let holdStart: number | null = null;
+      let failures = 0;
 
       const cancelHold = () => {
         holdStart = null;
@@ -98,7 +106,16 @@ export function CameraCheck({ onCaptured, onError, onCancel }: Props) {
         let state: GuideState;
         try {
           state = await guide.next();
+          failures = 0;
         } catch {
+          if (!live) return;
+          if (++failures >= MAX_GUIDE_FAILURES) {
+            live = false;
+            guide.stop();
+            setHold(null);
+            cb.current.onError(GUIDE_FAILED);
+            return;
+          }
           state = { kind: 'no-face' };
         }
         if (!live) return;
@@ -133,10 +150,20 @@ export function CameraCheck({ onCaptured, onError, onCancel }: Props) {
         } else {
           setPrompt(promptFor(state));
           if (state.kind === 'ready' && state.blinked && Date.now() - lastMatch >= MATCH_GAP_MS) {
+            let frame: string | null = null;
+            try {
+              frame = await guide.capture();
+            } catch {
+              // Camera not ready yet: try again on the next tick, without using the 2 s gate.
+            }
+            if (!live) return;
+            if (frame === null) {
+              await sleep(TICK_MS);
+              continue;
+            }
             lastMatch = Date.now();
             let matched = false;
             try {
-              const frame = await guide.capture();
               matched = (await matchFace(frame)).matched;
               if (!matched) setNotice(NOT_RECOGNISED);
             } catch (err) {

@@ -97,8 +97,10 @@ function setup(opts: { today?: Today; check?: () => Response } = {}) {
           },
         ]),
       );
-    if (url.includes('/api/attendance/today'))
+    if (url.includes('/api/attendance/today')) {
+      posted.todayLoads = ((posted.todayLoads as number | undefined) ?? 0) + 1;
       return Promise.resolve(json(200, opts.today ?? today()));
+    }
     if (url.includes('/api/attendance/settings/'))
       return Promise.resolve(
         json(200, {
@@ -133,11 +135,15 @@ function setup(opts: { today?: Today; check?: () => Response } = {}) {
 const track = { stop: vi.fn() };
 const stream = { getTracks: () => [track] };
 
-function stubDevices(camera: () => Promise<unknown> = () => Promise.resolve(stream)) {
+function stubDevices(
+  camera: () => Promise<unknown> = () => Promise.resolve(stream),
+  answers = true,
+) {
   Object.defineProperty(navigator, 'geolocation', {
     configurable: true,
     value: {
       getCurrentPosition: (ok: PositionCallback) =>
+        answers &&
         ok({
           coords: { latitude: SITE.lat + 0.0003, longitude: SITE.lng, accuracy: 8 },
           timestamp: Date.now(),
@@ -159,8 +165,26 @@ function renderAt(path: string) {
   return router;
 }
 
-const timeOf = (iso: string) =>
-  new Date(iso).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+const checkedIn = {
+  id: 'e1',
+  kind: 'check_in',
+  status: 'recorded',
+  reasons: [],
+  at: AT,
+  workDate: '2026-10-16',
+  distanceM: 42.3,
+  lateMin: 12,
+  projectName: 'Riverside Tower',
+};
+
+/** Clicks Check in and waits for the green screen (fake timers must be on). */
+async function reachHold() {
+  const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+  renderAt('/attendance');
+  await user.click(await screen.findByRole('button', { name: 'Check in' }));
+  expect(await screen.findByText('Hold still… 3')).toBeTruthy();
+  return user;
+}
 
 describe('Attendance page', () => {
   beforeEach(() => {
@@ -193,20 +217,7 @@ describe('Attendance page', () => {
 
   it('green screen then confirmation with time and distance', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    const posted = setup({
-      check: () =>
-        json(200, {
-          id: 'e1',
-          kind: 'check_in',
-          status: 'recorded',
-          reasons: [],
-          at: AT,
-          workDate: '2026-10-16',
-          distanceM: 42.3,
-          lateMin: 12,
-          projectName: 'Riverside Tower',
-        }),
-    });
+    const posted = setup({ check: () => json(200, checkedIn) });
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     renderAt('/attendance');
     await user.click(await screen.findByRole('button', { name: 'Check in' }));
@@ -220,7 +231,7 @@ describe('Attendance page', () => {
     });
 
     expect(
-      await screen.findByText(`Checked in at ${timeOf(AT)} · Riverside Tower · 42 m from site`),
+      await screen.findByText('Checked in at 08:52 · Riverside Tower · 42 m from site'),
     ).toBeTruthy();
     expect(screen.getByText('Late by 12 min')).toBeTruthy();
     expect(screen.queryByText(/Hold still/)).toBeNull();
@@ -229,6 +240,12 @@ describe('Attendance page', () => {
     expect(check.projectId).toBe(P1);
     expect(check.frames).toHaveLength(3);
     expect(guide.stop).toHaveBeenCalled();
+
+    // Today updates from the result: the next action is Check out, without a reload.
+    await user.click(screen.getByRole('button', { name: 'Done' }));
+    expect(screen.getByRole('button', { name: 'Check out' })).toBeTruthy();
+    expect(screen.getByText('Checked in at 08:52')).toBeTruthy();
+    expect(posted.todayLoads).toBe(1);
   });
 
   it('pending confirmation lists reasons', async () => {
@@ -265,6 +282,76 @@ describe('Attendance page', () => {
     const items = screen.getAllByRole('listitem').map((li) => li.textContent);
     expect(items).toContain('Outside site radius (240 m, allowed 100 m)');
     expect(items).toContain('Location accuracy too low (±150 m)');
+
+    await user.click(screen.getByRole('button', { name: 'Done' }));
+    expect(screen.getByText('Done for today')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Check out' })).toBeNull();
+  });
+
+  it('already checked in goes back to the status view with a fresh copy of today', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const posted = setup({
+      check: () =>
+        json(409, {
+          error: { code: 'already_checked_in', message: 'You have already checked in today.' },
+        }),
+    });
+    await reachHold();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(4000);
+    });
+    expect(await screen.findByRole('button', { name: 'Check in' })).toBeTruthy();
+    expect(posted.todayLoads).toBe(2);
+    expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull();
+  });
+
+  it('cancels the hold when the face is lost', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const posted = setup({ check: () => json(200, checkedIn) });
+    await reachHold();
+    guide.state = { kind: 'no-face' };
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(4000);
+    });
+    expect(screen.queryByText(/Hold still/)).toBeNull();
+    expect(screen.getByText('Look at the camera')).toBeTruthy();
+    expect(guide.resetBlink).toHaveBeenCalled();
+    expect(posted.check).toBeUndefined();
+  });
+
+  it('gives up when the location never comes', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    setup();
+    stubDevices(undefined, false);
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    renderAt('/attendance');
+    await user.click(await screen.findByRole('button', { name: 'Check in' }));
+    expect(screen.getByText('Finding your location…')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeTruthy();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(20_000);
+    });
+    expect(
+      screen.getByText('Could not find your location. Step into the open and try again.'),
+    ).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy();
+  });
+
+  it('stops the camera when the face check keeps failing', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    setup();
+    guide.next.mockRejectedValue(new Error('models failed'));
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    renderAt('/attendance');
+    await user.click(await screen.findByRole('button', { name: 'Check in' }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000);
+    });
+    expect(
+      screen.getByText('The face check could not start. Check your connection and try again.'),
+    ).toBeTruthy();
+    expect(guide.next).toHaveBeenCalledTimes(20);
+    expect(guide.stop).toHaveBeenCalled();
   });
 
   it('shows a plain message when the camera is blocked', async () => {

@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Link, createFileRoute } from '@tanstack/react-router';
-import { distanceMeters } from '@sitediary/shared';
+import { ATTENDANCE_TZ, distanceMeters } from '@sitediary/shared';
 import { ApiError, api, errorMessage } from '../lib/api';
 import {
   getSettings,
@@ -24,6 +24,15 @@ export const Route = createFileRoute('/attendance')({ component: Attendance });
 const LOCATION_BLOCKED =
   'Location is blocked. Allow location for this site in your browser settings.';
 const LOCATION_FAILED = 'Could not find your location. Step into the open and try again.';
+/** Some phones never answer getCurrentPosition; give up after this. */
+const LOCATE_TIMEOUT_MS = 20_000;
+/** /check refusals that mean our copy of today is out of date. */
+const RELOAD_ON = new Set([
+  'face_not_registered',
+  'already_checked_in',
+  'already_checked_out',
+  'check_in_first',
+]);
 const NOT_SET_UP =
   'Attendance is not set up for this project yet. Ask your admin to set the site location.';
 
@@ -82,12 +91,19 @@ function AttendanceBody() {
   const [loadError, setLoadError] = useState('');
   const [step, setStep] = useState<Step>({ kind: 'idle' });
   const [reload, setReload] = useState(0);
+  // Each location request gets an id; a cancelled or timed-out one is ignored.
+  const locateId = useRef(0);
+  const locateTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  useEffect(() => () => clearTimeout(locateTimer.current), []);
 
   const projectId = project?.id;
   useEffect(() => {
     if (!projectId) return;
     let live = true;
     setLoadError('');
+    setToday(null);
+    setSettings(null);
     Promise.all([getToday(projectId), getSettings(projectId)]).then(
       ([t, s]) => {
         if (!live) return;
@@ -105,32 +121,67 @@ function AttendanceBody() {
   if (project === null) return projectError ? <Alert>{projectError}</Alert> : <NoProject />;
 
   const kind: CheckKind = today?.checkIn ? 'check_out' : 'check_in';
+  const tz = settings?.timezone ?? ATTENDANCE_TZ;
+
+  function stopLocating() {
+    locateId.current++;
+    clearTimeout(locateTimer.current);
+  }
 
   function start() {
+    stopLocating();
+    const id = locateId.current;
+    const current = () => locateId.current === id;
     setStep({ kind: 'locating' });
     if (!('geolocation' in navigator)) {
       setStep({ kind: 'failed', message: LOCATION_FAILED });
       return;
     }
+    locateTimer.current = setTimeout(() => {
+      if (!current()) return;
+      stopLocating();
+      setStep({ kind: 'failed', message: LOCATION_FAILED });
+    }, LOCATE_TIMEOUT_MS);
     navigator.geolocation.getCurrentPosition(
-      (p) =>
+      (p) => {
+        if (!current()) return;
+        stopLocating();
         setStep({
           kind: 'camera',
           pos: { lat: p.coords.latitude, lng: p.coords.longitude, accuracyM: p.coords.accuracy },
-        }),
-      (err) =>
+        });
+      },
+      (err) => {
+        if (!current()) return;
+        stopLocating();
         setStep({
           kind: 'failed',
           message: err.code === 1 ? LOCATION_BLOCKED : LOCATION_FAILED, // 1 = PERMISSION_DENIED
-        }),
+        });
+      },
       { enableHighAccuracy: true, timeout: 15000 },
     );
+  }
+
+  function cancelLocating() {
+    stopLocating();
+    setStep({ kind: 'idle' });
   }
 
   async function submit(pos: Position, frames: string[]) {
     setStep({ kind: 'sending' });
     try {
       const result = await postCheck({ projectId: project!.id, kind, ...pos, frames });
+      const entry: TodayEntry = {
+        status: result.status,
+        at: result.at,
+        distanceM: result.distanceM,
+        lateMin: result.lateMin,
+        reasons: result.reasons,
+      };
+      setToday((t) =>
+        t ? { ...t, [result.kind === 'check_in' ? 'checkIn' : 'checkOut']: entry } : t,
+      );
       setStep({ kind: 'done', result });
     } catch (err) {
       if (err instanceof ApiError && err.code === 'attendance_not_set_up') {
@@ -138,16 +189,17 @@ function AttendanceBody() {
         setStep({ kind: 'idle' });
         return;
       }
-      if (err instanceof ApiError && err.code === 'face_not_registered') {
-        setStep({ kind: 'idle' });
-        setReload((n) => n + 1);
+      if (err instanceof ApiError && RELOAD_ON.has(err.code)) {
+        // Today's status on the server differs from ours: show the fresh one.
+        back();
         return;
       }
       setStep({ kind: 'failed', message: errorMessage(err) });
     }
   }
 
-  function finish() {
+  /** Back to the status view with a fresh copy of today. */
+  function back() {
     setStep({ kind: 'idle' });
     setReload((n) => n + 1);
   }
@@ -157,7 +209,8 @@ function AttendanceBody() {
   else if (!today) body = <Loading />;
   else if (!today.setUp) body = <Card>{NOT_SET_UP}</Card>;
   else if (today.face !== 'approved') body = <FaceCard face={today.face} />;
-  else if (step.kind === 'done') body = <Confirmation result={step.result} onDone={finish} />;
+  else if (step.kind === 'done')
+    body = <Confirmation result={step.result} tz={tz} onDone={() => setStep({ kind: 'idle' })} />;
   else if (step.kind === 'failed')
     body = (
       <div className={card}>
@@ -167,7 +220,7 @@ function AttendanceBody() {
         <button type="button" className={primaryButton} onClick={start}>
           Try again
         </button>
-        <button type="button" className={secondaryButton} onClick={finish}>
+        <button type="button" className={secondaryButton} onClick={back}>
           Back
         </button>
       </div>
@@ -183,9 +236,17 @@ function AttendanceBody() {
         />
       </div>
     );
-  else if (step.kind === 'locating') body = <Loading>Finding your location…</Loading>;
+  else if (step.kind === 'locating')
+    body = (
+      <div className={card}>
+        <Loading>Finding your location…</Loading>
+        <button type="button" className={secondaryButton} onClick={cancelLocating}>
+          Cancel
+        </button>
+      </div>
+    );
   else if (step.kind === 'sending') body = <Loading>Saving…</Loading>;
-  else body = <Status today={today} kind={kind} onStart={start} />;
+  else body = <Status today={today} kind={kind} tz={tz} onStart={start} />;
 
   return (
     <div className="flex flex-col gap-4">
@@ -197,8 +258,14 @@ function AttendanceBody() {
   );
 }
 
-const timeOf = (iso: string) =>
-  new Date(iso).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+/** HH:MM (24 h) in the site's timezone. */
+const timeOf = (iso: string, tz: string) =>
+  new Date(iso).toLocaleTimeString(undefined, {
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+    timeZone: tz,
+  });
 
 function Card({ children }: { children: ReactNode }) {
   return (
@@ -239,19 +306,29 @@ function FaceCard({ face }: { face: Today['face'] }) {
   );
 }
 
-function entryLine(label: string, e: TodayEntry): string {
+function entryLine(label: string, e: TodayEntry, tz: string): string {
   const extra = e.status === 'pending' ? ' · waiting for approval' : '';
-  return `${label} at ${timeOf(e.at)}${extra}`;
+  return `${label} at ${timeOf(e.at, tz)}${extra}`;
 }
 
-function Status({ today, kind, onStart }: { today: Today; kind: CheckKind; onStart: () => void }) {
+function Status({
+  today,
+  kind,
+  tz,
+  onStart,
+}: {
+  today: Today;
+  kind: CheckKind;
+  tz: string;
+  onStart: () => void;
+}) {
   const done = today.checkIn && today.checkOut;
   return (
     <div className="flex flex-col gap-4">
       {(today.checkIn || today.checkOut) && (
         <ul className={`${card} gap-1`} aria-label="Today">
-          {today.checkIn && <li>{entryLine('Checked in', today.checkIn)}</li>}
-          {today.checkOut && <li>{entryLine('Checked out', today.checkOut)}</li>}
+          {today.checkIn && <li>{entryLine('Checked in', today.checkIn, tz)}</li>}
+          {today.checkOut && <li>{entryLine('Checked out', today.checkOut, tz)}</li>}
         </ul>
       )}
       {done ? (
@@ -281,9 +358,17 @@ function Distance({ pos, settings }: { pos: Position; settings: AttendanceSettin
   );
 }
 
-function Confirmation({ result, onDone }: { result: CheckResult; onDone: () => void }) {
+function Confirmation({
+  result,
+  tz,
+  onDone,
+}: {
+  result: CheckResult;
+  tz: string;
+  onDone: () => void;
+}) {
   const verb = result.kind === 'check_in' ? 'Checked in' : 'Checked out';
-  const line = `${verb} at ${timeOf(result.at)} · ${result.projectName} · ${Math.round(result.distanceM)} m from site`;
+  const line = `${verb} at ${timeOf(result.at, tz)} · ${result.projectName} · ${Math.round(result.distanceM)} m from site`;
   const pending = result.status === 'pending';
   return (
     <div className="flex flex-col gap-4">

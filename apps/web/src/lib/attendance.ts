@@ -115,7 +115,19 @@ export const putSettings = (projectId: string, body: AttendanceSettingsInput) =>
 /** Previews whether one frame matches the approved face. Records nothing. */
 export const matchFace = (frame: string) => api<MatchResult>(`${BASE}/match`, { body: { frame } });
 
-export const postCheck = (body: CheckInput) => api<CheckResult>(`${BASE}/check`, { body });
+/** How long a check may take before we give up and offer Try again. */
+export const CHECK_TIMEOUT_MS = 30_000;
+
+/** Records a check-in/out. Gives up after CHECK_TIMEOUT_MS with the `unavailable` ApiError. */
+export async function postCheck(body: CheckInput): Promise<CheckResult> {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), CHECK_TIMEOUT_MS);
+  try {
+    return await api<CheckResult>(`${BASE}/check`, { body, signal: ctl.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 export const registerFace = (frames: string[]) =>
   api<{ status: 'pending' }>(`${BASE}/face`, { body: { consent: true, frames } });
