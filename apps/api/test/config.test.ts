@@ -158,4 +158,19 @@ describe('loadConfig', () => {
     it('uses human in production by default', () =>
       expect(loadConfig(prod).faceEngine).toBe('human'));
   });
+
+  describe('face thresholds', () => {
+    it('default to 0.50 match and 0.60 liveness', () =>
+      expect(loadConfig(base).faceThresholds).toEqual({ minSimilarity: 0.5, minLiveness: 0.6 }));
+    it('read FACE_MATCH_MIN and FACE_LIVENESS_MIN', () =>
+      expect(
+        loadConfig({ ...base, FACE_MATCH_MIN: '0.62', FACE_LIVENESS_MIN: '0.7' }).faceThresholds,
+      ).toEqual({ minSimilarity: 0.62, minLiveness: 0.7 }));
+    it.each(['-0.1', '1.01', 'abc'])('rejects FACE_MATCH_MIN=%s', (v) =>
+      expect(() => loadConfig({ ...base, FACE_MATCH_MIN: v })).toThrow('FACE_MATCH_MIN'),
+    );
+    it.each(['-0.1', '1.5', 'x'])('rejects FACE_LIVENESS_MIN=%s', (v) =>
+      expect(() => loadConfig({ ...base, FACE_LIVENESS_MIN: v })).toThrow('FACE_LIVENESS_MIN'),
+    );
+  });
 });

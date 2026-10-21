@@ -20,11 +20,19 @@ export const ATTENDANCE_DEFAULTS = {
 const EARTH_RADIUS_M = 6371008.8;
 const MAX_ACCURACY_M = 100;
 const MIN_PLAUSIBLE_ACCURACY_M = 1;
-/** Lowest face similarity (0..1) that counts as the registered person. */
+/** Default lowest face similarity (0..1) that counts as the registered person. */
 export const MIN_SIMILARITY = 0.5;
-/** Lowest anti-spoof and liveness score (0..1) that passes. */
+/** Default lowest anti-spoof and liveness score (0..1) that passes. */
 export const MIN_LIVENESS = 0.6;
-const MIN_FACE_WIDTH_PX = 160;
+/** Smallest face width, in pixels of the photo as the server reads it, that counts as clear. */
+export const MIN_FACE_WIDTH_PX = 160;
+
+/** Face thresholds `decideCheck` applies; the API reads them from FACE_MATCH_MIN / FACE_LIVENESS_MIN. */
+export type FaceThresholds = { minSimilarity: number; minLiveness: number };
+export const DEFAULT_FACE_THRESHOLDS: FaceThresholds = {
+  minSimilarity: MIN_SIMILARITY,
+  minLiveness: MIN_LIVENESS,
+};
 
 export type LatLng = { lat: number; lng: number };
 
@@ -77,14 +85,23 @@ export type CheckSignals = {
   faces: number;
   minFaceWidth: number;
   similarity: number | null;
+  /** Lowest anti-spoof score over the frames. */
   real: number;
+  /** Lowest liveness score over the frames. */
   live: number;
+  /** Every pair of frames shows the same person. */
+  framesAgree: boolean;
+  /** No two frames are identical or near-identical (a replayed photo). */
+  framesDistinct: boolean;
 };
 
 export type CheckDecision = { status: 'recorded' | 'pending'; reasons: string[] };
 
 /** Applies the attendance rules; reasons are listed radius, accuracy, face, liveness. */
-export function decideCheck(s: CheckSignals): CheckDecision {
+export function decideCheck(
+  s: CheckSignals,
+  t: FaceThresholds = DEFAULT_FACE_THRESHOLDS,
+): CheckDecision {
   const reasons: string[] = [];
   // Every check is written so that NaN (or a missing value) fails closed.
   if (!(s.distanceM <= s.radiusM)) {
@@ -100,15 +117,15 @@ export function decideCheck(s: CheckSignals): CheckDecision {
   } else if (s.accuracyM < MIN_PLAUSIBLE_ACCURACY_M) {
     reasons.push('Possible mock location');
   }
-  if (s.faces !== 1 || !(s.minFaceWidth >= MIN_FACE_WIDTH_PX)) {
+  if (s.faces !== 1 || !(s.minFaceWidth >= MIN_FACE_WIDTH_PX) || s.framesAgree !== true) {
     reasons.push('Face not clear');
   } else if (s.similarity === null || Number.isNaN(s.similarity)) {
     reasons.push('Face not clear');
-  } else if (s.similarity < MIN_SIMILARITY) {
+  } else if (s.similarity < t.minSimilarity) {
     const truncated = Math.floor(s.similarity * 100 + 1e-9) / 100;
     reasons.push(`Face not matched (score ${truncated.toFixed(2)})`);
   }
-  if (!(s.real >= MIN_LIVENESS) || !(s.live >= MIN_LIVENESS)) {
+  if (!(s.real >= t.minLiveness) || !(s.live >= t.minLiveness) || s.framesDistinct !== true) {
     reasons.push('Liveness failed');
   }
   return { status: reasons.length === 0 ? 'recorded' : 'pending', reasons };
@@ -166,6 +183,11 @@ const framesSchema = (count: number) =>
 
 export const CHECK_FRAME_COUNT = 3;
 export const REGISTRATION_FRAME_COUNT = 5;
+/**
+ * Which registration frame the approver sees: the first "look straight" photo. The web
+ * capture order is blink, turn left, turn right, then two straight-ahead frames (3 and 4).
+ */
+export const REGISTRATION_PHOTO_FRAME = 3;
 
 /** `POST` a check-in or check-out. */
 export const checkBodySchema = z.object({

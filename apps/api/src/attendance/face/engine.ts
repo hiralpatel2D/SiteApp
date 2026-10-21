@@ -164,8 +164,22 @@ function sharedHuman(): Promise<HumanInstance> {
   return loading;
 }
 
+/** Side of the greyscale downscale used to spot replayed frames. */
+const THUMB_SIDE = 32;
+
+/** The decoded photo scaled to 32×32 greyscale (1024 bytes), for the replay check. */
+async function thumbOf(data: Buffer, info: sharp.OutputInfo): Promise<Uint8Array> {
+  const out = await sharp(data, { raw: { width: info.width, height: info.height, channels: 3 } })
+    .greyscale()
+    .resize(THUMB_SIDE, THUMB_SIDE, { fit: 'fill' })
+    .raw()
+    .toBuffer();
+  return new Uint8Array(out.buffer, out.byteOffset, out.length);
+}
+
 async function detect(jpeg: Buffer): Promise<FaceReading> {
   const { data, info } = await decodeJpeg(jpeg);
+  const thumb = await thumbOf(data, info);
   const h = await sharedHuman();
   const tensor = h.tf.tensor3d(new Uint8Array(data), [info.height, info.width, 3], 'int32');
   let result: Awaited<ReturnType<HumanInstance['detect']>>;
@@ -176,7 +190,9 @@ async function detect(jpeg: Buffer): Promise<FaceReading> {
   }
   if (result.error) throw new Error(`Face detection failed: ${result.error}`);
   const faces = result.face;
-  if (faces.length === 0) return { faces: 0, minFaceWidth: 0, embedding: null, real: 0, live: 0 };
+  if (faces.length === 0) {
+    return { faces: 0, minFaceWidth: 0, embedding: null, real: 0, live: 0, thumb };
+  }
   const only = faces.length === 1 ? faces[0] : undefined;
   return {
     faces: faces.length,
@@ -184,6 +200,7 @@ async function detect(jpeg: Buffer): Promise<FaceReading> {
     embedding: only?.embedding?.length ? Array.from(only.embedding) : null,
     real: Math.min(...faces.map((f) => f.real ?? 0)),
     live: Math.min(...faces.map((f) => f.live ?? 0)),
+    thumb,
   };
 }
 

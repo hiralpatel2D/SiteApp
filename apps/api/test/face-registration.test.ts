@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { eq } from 'drizzle-orm';
-import { newId } from '@sitediary/shared';
+import { newId, REGISTRATION_PHOTO_FRAME } from '@sitediary/shared';
 import { createCompany } from '../src/companies/create-company';
 import {
   auditLog,
@@ -9,8 +9,9 @@ import {
   projectAssignments,
   projects,
 } from '../src/db/schema';
-import { createFakeEngine } from '../src/attendance/face/fake';
+import { createFakeEngine, FAKE_EMBEDDING, fakeEmbedding } from '../src/attendance/face/fake';
 import type { FaceReading } from '../src/attendance/face/types';
+import type { Config } from '../src/config';
 import { ownerDb, useTestDb } from './helpers/db';
 import { req, seedMember, testApp } from './helpers/auth';
 
@@ -19,10 +20,9 @@ useTestDb();
 type ErrorBody = { error: { code: string; message: string } };
 const errorOf = async (r: Response) => ((await r.json()) as ErrorBody).error;
 
-const GOOD: FaceReading = {
+const GOOD: Omit<FaceReading, 'embedding' | 'thumb'> = {
   faces: 1,
   minFaceWidth: 320,
-  embedding: Array.from({ length: 1024 }, () => 1 / 32),
   real: 0.95,
   live: 0.95,
 };
@@ -30,9 +30,17 @@ const GOOD: FaceReading = {
 const frame = (n: number) => Buffer.from([n, n, n, n]).toString('base64');
 const frames = (start = 1) => [0, 1, 2, 3, 4].map((i) => frame(start + i));
 
-async function setup(readings: Record<number, Partial<FaceReading>> = {}, gateReads = 0) {
+async function setup(
+  readings: Record<number, Partial<FaceReading>> = {},
+  gateReads = 0,
+  config: Partial<Config> = {},
+) {
   const co = await createCompany(ownerDb, { name: 'Alpha Builders', slug: 'alpha' });
-  const base = createFakeEngine((jpeg) => ({ ...GOOD, ...readings[jpeg[0]!] }));
+  const base = createFakeEngine((jpeg) => ({
+    ...GOOD,
+    embedding: fakeEmbedding(jpeg),
+    ...readings[jpeg[0]!],
+  }));
   // With gateReads set, the last frame read of each request waits until that many requests have reached it, so parallel requests reach the DB together.
   let started = 0;
   let open!: () => void;
@@ -47,7 +55,7 @@ async function setup(readings: Record<number, Partial<FaceReading>> = {}, gateRe
       return base.read(jpeg);
     },
   };
-  const { deps } = testApp();
+  const { deps } = testApp({ config });
   const withEngine = (await import('../src/app')).createApp({ ...deps, faceEngine });
   const worker = await seedMember(co.companyId, 'site_engineer', 'w@alpha.test', {
     app: withEngine,
@@ -90,7 +98,9 @@ describe('face registration', () => {
     expect(await res.json()).toEqual({ status: 'pending' });
     expect(await statusOf(ctx, ctx.worker.cookie)).toBe('pending');
     const [row] = await rows();
-    expect(row!.photo).not.toBeNull();
+    // The approver sees a straight-ahead frame (the first "look straight" photo).
+    expect(REGISTRATION_PHOTO_FRAME).toBe(3);
+    expect(row!.photo!.toString('base64')).toBe(frames()[REGISTRATION_PHOTO_FRAME]);
     expect(row!.modelVersion).toBe('fake');
     const audits = await ownerDb
       .select()
@@ -134,6 +144,51 @@ describe('face registration', () => {
     const res = await register(ctx, ctx.worker.cookie);
     expect(res.status).toBe(422);
     expect((await errorOf(res)).code).toBe('face_not_consistent');
+  });
+
+  it.each([
+    ['byte-identical photos', {}, [1, 2, 3, 2, 5]],
+    [
+      'near-identical photos',
+      { 2: { thumb: new Uint8Array(1024).fill(50) }, 4: { thumb: new Uint8Array(1024).fill(51) } },
+      [1, 2, 3, 4, 5],
+    ],
+    [
+      'photos with identical embeddings',
+      Object.fromEntries([1, 2, 3, 4, 5].map((n) => [n, { embedding: [...FAKE_EMBEDDING] }])),
+      [1, 2, 3, 4, 5],
+    ],
+  ] as const)('rejects %s as frames_identical', async (_, readings, nums) => {
+    const ctx = await setup(readings as Record<number, Partial<FaceReading>>);
+    const res = await register(ctx, ctx.worker.cookie, nums.map(frame));
+    expect(res.status).toBe(422);
+    expect(await errorOf(res)).toEqual({
+      code: 'frames_identical',
+      message: 'Hold the phone steady and try again — the photos looked identical.',
+    });
+    expect(await rows()).toHaveLength(0);
+  });
+
+  it('uses FACE_LIVENESS_MIN from config for the photos', async () => {
+    const ctx = await setup({}, 0, { faceThresholds: { minSimilarity: 0.5, minLiveness: 0.97 } });
+    const res = await register(ctx, ctx.worker.cookie);
+    expect(res.status).toBe(422);
+    expect((await errorOf(res)).code).toBe('face_not_clear');
+  });
+
+  it('limits registrations per member, not per IP', async () => {
+    const ctx = await setup();
+    const ip = '10.8.8.8';
+    const as = (cookie: string | undefined, f = frames()) =>
+      req(ctx.app, '/api/attendance/face', {
+        cookie,
+        company: ctx.co.companyId,
+        body: { consent: true, frames: f },
+        ip,
+      });
+    for (let i = 0; i < 5; i++) expect((await as(ctx.worker.cookie)).status).toBe(200);
+    expect((await as(ctx.worker.cookie)).status).toBe(429);
+    expect((await as(ctx.pm.cookie)).status).toBe(200);
   });
 
   it('a new registration replaces the older pending one', async () => {

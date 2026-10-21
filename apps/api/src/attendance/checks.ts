@@ -3,8 +3,7 @@ import { bodyLimit } from 'hono/body-limit';
 import { and, eq, ne } from 'drizzle-orm';
 import {
   ATTENDANCE_TZ,
-  MIN_LIVENESS,
-  MIN_SIMILARITY,
+  MIN_FACE_WIDTH_PX,
   checkBodySchema,
   decideCheck,
   distanceMeters,
@@ -22,10 +21,11 @@ import { isUniqueViolation } from '../db/errors';
 import type { AppTx } from '../db/tenant';
 import { parseBody } from '../http/body';
 import { AppError } from '../http/errors';
-import { rateLimit } from '../http/rate-limit';
 import { requireCap, runInTenant, type Tenant, type TenantEnv } from '../tenant/context';
 import type { FaceEngine, FaceReading } from './face/engine';
+import { framesAgree, framesDistinct } from './face/frames';
 import { decryptTemplate } from './face/template';
+import { ipBackstop, memberLimit } from './limits';
 import { canSeeProject } from './reach';
 import { approvedTemplate, faceStatus } from './registration';
 
@@ -43,6 +43,16 @@ const notRegistered = () =>
     'face_not_registered',
     'Register your face and wait for approval before checking in.',
   );
+const registerAgain = () => new AppError(409, 'face_not_registered', 'Register your face again.');
+
+/** The approved template; one that no longer decrypts (key rotated, row damaged) means register again. */
+function openTemplate(blob: Buffer, key: Buffer): number[] {
+  try {
+    return decryptTemplate(blob, key);
+  } catch {
+    throw registerAgain();
+  }
+}
 const checkInFirst = () => new AppError(409, 'check_in_first', 'Check in first.');
 const already = (kind: CheckBody['kind']) =>
   kind === 'check_in'
@@ -100,10 +110,18 @@ const median = (xs: number[]): number | null => {
   const mid = Math.floor(s.length / 2);
   return s.length % 2 === 1 ? s[mid]! : (s[mid - 1]! + s[mid]!) / 2;
 };
-const mean = (xs: number[]) => xs.reduce((a, b) => a + b, 0) / xs.length;
 
-/** Combines the frame readings into the face signals `decideCheck` takes. */
-function faceSignals(readings: FaceReading[], template: number[], engine: FaceEngine) {
+/**
+ * Combines the frame readings into the face signals `decideCheck` takes. Anti-spoof and
+ * liveness are the LOWEST frame's, so one spoofed frame among live ones fails; the frames
+ * must also be one person and must not be replays of one photo.
+ */
+function faceSignals(
+  jpegs: Buffer[],
+  readings: FaceReading[],
+  template: number[],
+  engine: FaceEngine,
+) {
   // Any frame without exactly one face decides the count, so 0 and 2+ both fail.
   const odd = readings.find((r) => r.faces !== 1);
   const sims = readings.flatMap((r) =>
@@ -113,8 +131,10 @@ function faceSignals(readings: FaceReading[], template: number[], engine: FaceEn
     faces: odd ? odd.faces : 1,
     minFaceWidth: Math.min(...readings.map((r) => r.minFaceWidth)),
     similarity: median(sims),
-    real: mean(readings.map((r) => r.real)),
-    live: mean(readings.map((r) => r.live)),
+    real: Math.min(...readings.map((r) => r.real)),
+    live: Math.min(...readings.map((r) => r.live)),
+    framesAgree: framesAgree(readings, engine),
+    framesDistinct: framesDistinct(jpegs, readings, engine),
   };
 }
 
@@ -131,10 +151,13 @@ export type CheckDeps = { config: Config; faceEngine: FaceEngine };
 /** `/match`, `/check` and `/today`: the server-side check-in decision. Mounted under the attendance router. */
 export function checkRoutes({ config, faceEngine }: CheckDeps): Hono<AppEnv> {
   const r = new Hono<TenantEnv>();
+  const thresholds = config.faceThresholds;
+  const perIp = ipBackstop();
 
   r.post(
     '/match',
-    rateLimit(MATCH_LIMIT),
+    perIp,
+    memberLimit(MATCH_LIMIT),
     requireCap('attendance.view'),
     limitBody(),
     async (c) => {
@@ -142,19 +165,21 @@ export function checkRoutes({ config, faceEngine }: CheckDeps): Hono<AppEnv> {
       const t = c.get('tenant');
       const blob = await runInTenant(c, (tx) => approvedTemplate(tx, t));
       if (!blob) throw notRegistered();
-      const template = decryptTemplate(blob, config.faceTemplateKey);
+      const template = openTemplate(blob, config.faceTemplateKey);
       const reading = await faceEngine.read(Buffer.from(body.frame, 'base64'));
-      const similarity =
-        reading.faces === 1 && reading.embedding
-          ? faceEngine.similarity(reading.embedding, template)
-          : null;
-      return c.json({ matched: similarity !== null && similarity >= MIN_SIMILARITY, similarity });
+      // The same face gate as /check: one face, wide enough to read.
+      const clear =
+        reading.faces === 1 && reading.minFaceWidth >= MIN_FACE_WIDTH_PX && reading.embedding;
+      const matched =
+        !!clear && faceEngine.similarity(reading.embedding!, template) >= thresholds.minSimilarity;
+      return c.json({ matched });
     },
   );
 
   r.post(
     '/check',
-    rateLimit(CHECK_LIMIT),
+    perIp,
+    memberLimit(CHECK_LIMIT),
     requireCap('attendance.view'),
     limitBody(),
     async (c) => {
@@ -177,19 +202,17 @@ export function checkRoutes({ config, faceEngine }: CheckDeps): Hono<AppEnv> {
         return { projectName: project!.name, settings, blob, date };
       });
       const { settings, date } = pre;
-      const template = decryptTemplate(pre.blob, config.faceTemplateKey);
+      const template = openTemplate(pre.blob, config.faceTemplateKey);
 
       const jpegs = body.frames.map((f) => Buffer.from(f, 'base64'));
       const readings: FaceReading[] = [];
       for (const jpeg of jpegs) readings.push(await faceEngine.read(jpeg));
-      const face = faceSignals(readings, template, faceEngine);
+      const face = faceSignals(jpegs, readings, template, faceEngine);
       const distanceM = distanceMeters(body, settings);
-      const decision = decideCheck({
-        distanceM,
-        radiusM: settings.radiusM,
-        accuracyM: body.accuracyM,
-        ...face,
-      });
+      const decision = decideCheck(
+        { distanceM, radiusM: settings.radiusM, accuracyM: body.accuracyM, ...face },
+        thresholds,
+      );
       const lateMin =
         body.kind === 'check_in'
           ? lateMinutes(now, settings.startTime, settings.lateAfterMin, settings.timezone)
@@ -213,8 +236,8 @@ export function checkRoutes({ config, faceEngine }: CheckDeps): Hono<AppEnv> {
             accuracyM: body.accuracyM,
             distanceM,
             similarity: face.similarity,
-            real: face.real >= MIN_LIVENESS,
-            live: face.live >= MIN_LIVENESS,
+            real: face.real >= thresholds.minLiveness,
+            live: face.live >= thresholds.minLiveness,
             status: decision.status,
             reasons: decision.reasons,
             lateMin,

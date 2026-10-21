@@ -3,6 +3,7 @@ import {
   ATTENDANCE_CAPABILITIES,
   attendanceSettingsBodySchema,
   checkBodySchema,
+  DEFAULT_FACE_THRESHOLDS,
   decideCheck,
   distanceMeters,
   faceRegistrationBodySchema,
@@ -23,6 +24,8 @@ const ok: CheckSignals = {
   similarity: 0.8,
   real: 0.9,
   live: 0.9,
+  framesAgree: true,
+  framesDistinct: true,
 };
 
 describe('distanceMeters', () => {
@@ -87,6 +90,27 @@ describe('decideCheck', () => {
       'Face not matched (score 0.42)',
       'Liveness failed',
     ]);
+  });
+});
+
+describe('decideCheck frame rules and thresholds', () => {
+  it('frames that are not the same person are Face not clear', () =>
+    expect(decideCheck({ ...ok, framesAgree: false }).reasons).toEqual(['Face not clear']));
+  it('identical or replayed frames fail liveness', () =>
+    expect(decideCheck({ ...ok, framesDistinct: false }).reasons).toEqual(['Liveness failed']));
+  it('uses the shared defaults when no thresholds are given', () => {
+    expect(DEFAULT_FACE_THRESHOLDS).toEqual({ minSimilarity: 0.5, minLiveness: 0.6 });
+    expect(decideCheck({ ...ok, similarity: 0.55, live: 0.65 }).status).toBe('recorded');
+  });
+  it('applies the thresholds it is given', () => {
+    const strict = { minSimilarity: 0.6, minLiveness: 0.7 };
+    expect(decideCheck({ ...ok, similarity: 0.55, live: 0.65 }, strict).reasons).toEqual([
+      'Face not matched (score 0.55)',
+      'Liveness failed',
+    ]);
+    expect(decideCheck({ ...ok, similarity: 0.6, real: 0.7, live: 0.7 }, strict).status).toBe(
+      'recorded',
+    );
   });
 });
 

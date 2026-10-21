@@ -9,6 +9,11 @@ export type FaceReading = {
   real: number;
   /** Liveness score (0..1), lowest over all faces; 0 with no face. */
   live: number;
+  /**
+   * The whole photo scaled to 32×32 greyscale (1024 bytes, row-major), for spotting
+   * replayed or near-identical frames. Null only when an engine cannot produce one.
+   */
+  thumb: Uint8Array | null;
 };
 
 export interface FaceEngine {

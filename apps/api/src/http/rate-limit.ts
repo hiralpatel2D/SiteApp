@@ -1,4 +1,4 @@
-import type { MiddlewareHandler } from 'hono';
+import type { Context, Env, MiddlewareHandler } from 'hono';
 import { AppError } from './errors';
 
 export type RateLimitOptions = {
@@ -7,6 +7,11 @@ export type RateLimitOptions = {
   windowMs: number;
   /** Clock, for tests. */
   now?: () => number;
+};
+
+export type RateLimitMiddlewareOptions<E extends Env = Env> = RateLimitOptions & {
+  /** The bucket for a request; defaults to the client IP. */
+  key?: (c: Context<E>) => string;
 };
 
 export type RateLimiter = {
@@ -49,16 +54,23 @@ export function createRateLimiter(opts: RateLimitOptions): RateLimiter {
   };
 }
 
+/** The client IP from `x-client-ip` (set by apps/web/server.mjs); `unknown` when missing. */
+export function clientIp<E extends Env>(c: Context<E>): string {
+  return c.req.header('x-client-ip')?.trim() || 'unknown';
+}
+
 /**
- * Middleware: 429 `rate_limited` once a client IP goes over the limit. The IP
- * comes from `x-client-ip`, which apps/web/server.mjs sets (and never takes
- * from the browser); requests without it share one bucket.
+ * Middleware: 429 `rate_limited` once a key goes over the limit. The key is the
+ * client IP by default (`x-client-ip`, which apps/web/server.mjs sets and never
+ * takes from the browser; requests without it share one bucket), or `opts.key`.
  */
-export function rateLimit(opts: RateLimitOptions): MiddlewareHandler {
+export function rateLimit<E extends Env = Env>(
+  opts: RateLimitMiddlewareOptions<E>,
+): MiddlewareHandler<E> {
   const limiter = createRateLimiter(opts);
+  const keyOf = opts.key ?? clientIp<E>;
   return async (c, next) => {
-    const ip = c.req.header('x-client-ip')?.trim() || 'unknown';
-    if (!limiter.hit(ip)) {
+    if (!limiter.hit(keyOf(c))) {
       throw new AppError(429, 'rate_limited', 'Too many attempts. Wait a minute and try again.');
     }
     await next();

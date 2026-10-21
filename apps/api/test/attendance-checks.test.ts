@@ -10,10 +10,11 @@ import {
   projectAssignments,
   projects,
 } from '../src/db/schema';
-import { createFakeEngine } from '../src/attendance/face/fake';
+import { createFakeEngine, FAKE_EMBEDDING, fakeEmbedding } from '../src/attendance/face/fake';
 import { encryptTemplate } from '../src/attendance/face/template';
 import type { FaceReading } from '../src/attendance/face/types';
-import { ownerDb, useTestDb } from './helpers/db';
+import type { Config } from '../src/config';
+import { ownerDb, truncateAll, useTestDb } from './helpers/db';
 import { req, seedMember, testApp } from './helpers/auth';
 
 useTestDb();
@@ -21,12 +22,16 @@ useTestDb();
 type ErrorBody = { error: { code: string; message: string } };
 const errorOf = async (r: Response) => ((await r.json()) as ErrorBody).error;
 
-const EMBEDDING = Array.from({ length: 1024 }, () => 1 / 32);
-const OTHER_EMBEDDING = Array.from({ length: 1024 }, () => -1);
-const GOOD: FaceReading = {
+// The registered template; each frame reads as this person with its own jitter (fakeEmbedding).
+const EMBEDDING = [...FAKE_EMBEDDING];
+/** Someone else, jittered per frame like a live person. */
+const stranger = (n: number) => fakeEmbedding(Buffer.from([n])).map((v) => v + 0.5);
+/** The registered person, `k` times further from the template than a normal frame. */
+const further = (n: number, k: number) =>
+  fakeEmbedding(Buffer.from([n])).map((v, i) => EMBEDDING[i]! + k * (v - EMBEDDING[i]!));
+const GOOD: Omit<FaceReading, 'embedding' | 'thumb'> = {
   faces: 1,
   minFaceWidth: 320,
-  embedding: EMBEDDING,
   real: 0.95,
   live: 0.95,
 };
@@ -45,12 +50,19 @@ async function setup(
     settings?: boolean;
     face?: boolean;
     gateReads?: number;
+    /** Store the approved template under another key (it will not decrypt). */
+    badTemplate?: boolean;
+    config?: Partial<Config>;
   } = {},
 ) {
   const co = await createCompany(ownerDb, { name: 'Alpha Builders', slug: 'alpha' });
   const other = await createCompany(ownerDb, { name: 'Bravo', slug: 'bravo' });
   const readings = opts.readings ?? {};
-  const base = createFakeEngine((jpeg) => ({ ...GOOD, ...readings[jpeg[0]!] }));
+  const base = createFakeEngine((jpeg) => ({
+    ...GOOD,
+    embedding: fakeEmbedding(jpeg),
+    ...readings[jpeg[0]!],
+  }));
   // With gateReads set, the last frame read of each request waits until that many requests reach it.
   let started = 0;
   let open!: () => void;
@@ -65,9 +77,10 @@ async function setup(
       return base.read(jpeg);
     },
   };
-  const { deps } = testApp();
+  const { deps } = testApp({ config: opts.config });
   const app = (await import('../src/app')).createApp({ ...deps, faceEngine });
   const worker = await seedMember(co.companyId, 'site_engineer', 'w@alpha.test', { app });
+  const mate = await seedMember(co.companyId, 'site_engineer', 'm@alpha.test', { app });
   const p1 = newId();
   const p2 = newId();
   const foreign = newId();
@@ -76,12 +89,14 @@ async function setup(
     { id: p2, companyId: co.companyId, name: 'Bridge', code: 'B1' },
     { id: foreign, companyId: other.companyId, name: 'Elsewhere', code: 'E1' },
   ]);
-  await ownerDb.insert(projectAssignments).values({
-    id: newId(),
-    companyId: co.companyId,
-    membershipId: worker.membershipId,
-    projectId: p1,
-  });
+  await ownerDb.insert(projectAssignments).values(
+    [worker, mate].map((m) => ({
+      id: newId(),
+      companyId: co.companyId,
+      membershipId: m.membershipId,
+      projectId: p1,
+    })),
+  );
   if (opts.settings !== false) {
     for (const [companyId, projectId] of [
       [co.companyId, p1],
@@ -101,17 +116,20 @@ async function setup(
     }
   }
   if (opts.face !== false) {
-    await ownerDb.insert(faceRegistrations).values({
-      id: newId(),
-      companyId: co.companyId,
-      membershipId: worker.membershipId,
-      status: 'approved',
-      template: encryptTemplate(EMBEDDING, deps.config.faceTemplateKey),
-      modelVersion: 'fake',
-      consentAt: new Date(),
-    });
+    const key = opts.badTemplate ? Buffer.alloc(32, 7) : deps.config.faceTemplateKey;
+    await ownerDb.insert(faceRegistrations).values(
+      [worker, mate].map((m) => ({
+        id: newId(),
+        companyId: co.companyId,
+        membershipId: m.membershipId,
+        status: 'approved',
+        template: encryptTemplate(EMBEDDING, key),
+        modelVersion: 'fake',
+        consentAt: new Date(),
+      })),
+    );
   }
-  return { co, app, worker, p1, p2, foreign };
+  return { co, app, worker, mate, p1, p2, foreign };
 }
 type Ctx = Awaited<ReturnType<typeof setup>>;
 
@@ -129,12 +147,19 @@ type CheckResult = {
 type Entry = { status: string; at: string; distanceM: number; lateMin: number; reasons: string[] };
 type Today = { setUp: boolean; face: string; checkIn: Entry | null; checkOut: Entry | null };
 
-const call = (ctx: Ctx, path: string, method = 'GET', body?: unknown) =>
+const call = (
+  ctx: Ctx,
+  path: string,
+  method = 'GET',
+  body?: unknown,
+  as: { cookie?: string; ip?: string } = ctx.worker,
+) =>
   req(ctx.app, `/api/attendance${path}`, {
-    cookie: ctx.worker.cookie,
+    cookie: as.cookie,
     company: ctx.co.companyId,
     method,
     body,
+    ip: as.ip,
   });
 const check = (ctx: Ctx, kind: 'check_in' | 'check_out', over: Record<string, unknown> = {}) =>
   call(ctx, '/check', 'POST', {
@@ -326,21 +351,21 @@ describe('attendance check-in / check-out', () => {
     expect(body.reasons).toEqual(['Face not clear']);
   });
 
-  it('a frame with no face is pending as Face not clear (liveness is the mean, so it passes)', async () => {
+  it('a frame with no face is pending as Face not clear and Liveness failed (lowest frame)', async () => {
     const ctx = await setup({
       readings: { 1: { faces: 0, minFaceWidth: 0, embedding: null, real: 0, live: 0 } },
     });
     const body = (await (await check(ctx, 'check_in')).json()) as CheckResult;
     expect(body.status).toBe('pending');
-    expect(body.reasons).toEqual(['Face not clear']);
+    expect(body.reasons).toEqual(['Face not clear', 'Liveness failed']);
   });
 
   it('a different face is pending as Face not matched', async () => {
     const ctx = await setup({
       readings: {
-        1: { embedding: OTHER_EMBEDDING },
-        2: { embedding: OTHER_EMBEDDING },
-        3: { embedding: OTHER_EMBEDDING },
+        1: { embedding: stranger(1) },
+        2: { embedding: stranger(2) },
+        3: { embedding: stranger(3) },
       },
     });
     const body = (await (await check(ctx, 'check_in')).json()) as CheckResult;
@@ -349,21 +374,118 @@ describe('attendance check-in / check-out', () => {
     expect(body.reasons).toEqual(['Face not matched (score 0.00)']);
   });
 
-  it('similarity is the median: one stranger frame among two matches still records', async () => {
-    const ctx = await setup({ readings: { 2: { embedding: OTHER_EMBEDDING } } });
+  it('one stranger frame among two matches is Face not clear: the frames must be one person', async () => {
+    const ctx = await setup({ readings: { 2: { embedding: stranger(2) } } });
     const body = (await (await check(ctx, 'check_in')).json()) as CheckResult;
-    expect(body.status).toBe('recorded');
+    expect(body.status).toBe('pending');
+    expect(body.reasons).toEqual(['Face not clear']);
     const [row] = await entries();
-    expect(row!.similarity).toBe(1);
+    expect(row!.similarity).toBe(1); // still the median, kept for the reviewer
   });
 
-  it('low mean liveness is pending as Liveness failed', async () => {
-    const ctx = await setup({ readings: { 1: { live: 0.2 }, 2: { live: 0.3 } } });
+  it('one low-liveness frame is pending as Liveness failed (lowest frame, not the mean)', async () => {
+    const ctx = await setup({ readings: { 2: { live: 0.2 } } });
     const body = (await (await check(ctx, 'check_in')).json()) as CheckResult;
     expect(body.reasons).toEqual(['Liveness failed']);
     const [row] = await entries();
     expect(row!.live).toBe(false);
     expect(row!.real).toBe(true);
+  });
+
+  it('one spoof frame among two live ones is pending as Liveness failed', async () => {
+    const ctx = await setup({ readings: { 3: { real: 0.1 } } });
+    const body = (await (await check(ctx, 'check_in')).json()) as CheckResult;
+    expect(body.reasons).toEqual(['Liveness failed']);
+    const [row] = await entries();
+    expect(row!.real).toBe(false);
+    expect(row!.live).toBe(true);
+  });
+
+  it('byte-identical frames are pending as Liveness failed', async () => {
+    const ctx = await setup();
+    const body = (await (
+      await check(ctx, 'check_in', { frames: [frame(1), frame(2), frame(1)] })
+    ).json()) as CheckResult;
+    expect(body.status).toBe('pending');
+    expect(body.reasons).toEqual(['Liveness failed']);
+    const [row] = await entries();
+    expect(row!.evidence).toHaveLength(3);
+  });
+
+  it('near-identical frames (32×32 grey downscale) are pending as Liveness failed', async () => {
+    const ctx = await setup({
+      readings: {
+        1: { thumb: new Uint8Array(1024).fill(100) },
+        3: { thumb: new Uint8Array(1024).fill(101) },
+      },
+    });
+    const body = (await (await check(ctx, 'check_in')).json()) as CheckResult;
+    expect(body.reasons).toEqual(['Liveness failed']);
+  });
+
+  it('frames whose embeddings are all identical are pending as Liveness failed', async () => {
+    const ctx = await setup({
+      readings: {
+        1: { embedding: EMBEDDING },
+        2: { embedding: EMBEDDING },
+        3: { embedding: EMBEDDING },
+      },
+    });
+    const body = (await (await check(ctx, 'check_in')).json()) as CheckResult;
+    expect(body.reasons).toEqual(['Liveness failed']);
+  });
+
+  it('uses FACE_MATCH_MIN and FACE_LIVENESS_MIN from config', async () => {
+    const readings = {
+      1: { embedding: further(1, 2) },
+      2: { embedding: further(2, 2) },
+      3: { embedding: further(3, 2) },
+    };
+    const lax = await setup({ readings });
+    const ok = (await (await check(lax, 'check_in')).json()) as CheckResult;
+    expect(ok.status).toBe('recorded');
+    await truncateAll();
+    const strict = await setup({
+      readings,
+      config: { faceThresholds: { minSimilarity: 0.9, minLiveness: 0.97 } },
+    });
+    const body = (await (await check(strict, 'check_in')).json()) as CheckResult;
+    expect(body.reasons).toEqual(['Face not matched (score 0.83)', 'Liveness failed']);
+    const match = await call(strict, '/match', 'POST', { frame: frame(1) });
+    expect(await match.json()).toEqual({ matched: false });
+  });
+
+  it('a template that no longer decrypts is face_not_registered: register again', async () => {
+    const ctx = await setup({ badTemplate: true });
+    for (const res of [
+      await check(ctx, 'check_in'),
+      await call(ctx, '/match', 'POST', { frame: frame(1) }),
+    ]) {
+      expect(res.status).toBe(409);
+      expect(await errorOf(res)).toEqual({
+        code: 'face_not_registered',
+        message: 'Register your face again.',
+      });
+    }
+    expect(await entries()).toHaveLength(0);
+  });
+
+  it('rate limits are per member: two members behind one IP do not share them', async () => {
+    const ctx = await setup();
+    const ip = '10.9.9.9';
+    const worker = { cookie: ctx.worker.cookie, ip };
+    const mate = { cookie: ctx.mate.cookie, ip };
+    for (let i = 0; i < 30; i++) {
+      expect((await call(ctx, '/match', 'POST', { frame: frame(1) }, worker)).status).toBe(200);
+    }
+    expect((await call(ctx, '/match', 'POST', { frame: frame(1) }, worker)).status).toBe(429);
+    expect((await call(ctx, '/match', 'POST', { frame: frame(1) }, mate)).status).toBe(200);
+    const body = { projectId: ctx.p1, kind: 'check_in', ...SITE, accuracyM: 12, frames: frames() };
+    for (let i = 0; i < 10; i++) {
+      expect((await call(ctx, '/check', 'POST', body, worker)).status).not.toBe(429);
+    }
+    expect((await call(ctx, '/check', 'POST', body, worker)).status).toBe(429);
+    expect((await call(ctx, '/check', 'POST', body, mate)).status).toBe(200);
   });
 
   it('two parallel check-ins: one succeeds, the other gets already_checked_in', async () => {
@@ -382,19 +504,21 @@ describe('attendance check-in / check-out', () => {
 describe('attendance match', () => {
   it('matches against the approved template and records nothing', async () => {
     const ctx = await setup({
-      readings: { 7: { embedding: OTHER_EMBEDDING }, 8: { faces: 0, embedding: null } },
+      readings: {
+        7: { embedding: stranger(7) },
+        8: { faces: 0, embedding: null },
+        9: { faces: 2 },
+        10: { minFaceWidth: 159 },
+      },
     });
     const ok = await call(ctx, '/match', 'POST', { frame: frame(1) });
     expect(ok.status).toBe(200);
-    expect(await ok.json()).toEqual({ matched: true, similarity: 1 });
-    const stranger = (await (await call(ctx, '/match', 'POST', { frame: frame(7) })).json()) as {
-      matched: boolean;
-      similarity: number;
-    };
-    expect(stranger.matched).toBe(false);
-    expect(stranger.similarity).toBeLessThan(0.5);
-    const none = await call(ctx, '/match', 'POST', { frame: frame(8) });
-    expect(await none.json()).toEqual({ matched: false, similarity: null });
+    // Only the verdict: the score is never shown to the person checking in.
+    expect(await ok.json()).toEqual({ matched: true });
+    for (const n of [7, 8, 9, 10]) {
+      const res = await call(ctx, '/match', 'POST', { frame: frame(n) });
+      expect(await res.json()).toEqual({ matched: false });
+    }
     expect(await entries()).toHaveLength(0);
     const audits = await ownerDb
       .select()

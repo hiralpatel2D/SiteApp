@@ -11,7 +11,7 @@ import {
   projectAssignments,
   projects,
 } from '../src/db/schema';
-import { createFakeEngine } from '../src/attendance/face/fake';
+import { createFakeEngine, FAKE_EMBEDDING, fakeEmbedding } from '../src/attendance/face/fake';
 import { encryptTemplate } from '../src/attendance/face/template';
 import { ownerDb, useTestDb } from './helpers/db';
 import { req, seedMember, testApp } from './helpers/auth';
@@ -21,8 +21,8 @@ useTestDb();
 type ErrorBody = { error: { code: string; message: string } };
 const errorOf = async (r: Response) => ((await r.json()) as ErrorBody).error;
 
-const EMBEDDING = Array.from({ length: 1024 }, () => 1 / 32);
-const GOOD = { faces: 1, minFaceWidth: 320, embedding: EMBEDDING, real: 0.95, live: 0.95 };
+const EMBEDDING = [...FAKE_EMBEDDING];
+const GOOD = { faces: 1, minFaceWidth: 320, real: 0.95, live: 0.95 };
 const frame = (n: number) => Buffer.from([n, n, n, n]).toString('base64');
 const SITE = { lat: 19.07, lng: 72.87 };
 const EARLY = new Date('2026-10-16T03:25:00Z');
@@ -41,7 +41,11 @@ type Pending = {
 
 async function setup() {
   const co = await createCompany(ownerDb, { name: 'Alpha Builders', slug: 'alpha' });
-  const faceEngine = createFakeEngine((jpeg) => ({ ...GOOD, real: jpeg[0]! === 9 ? 0.1 : 0.95 }));
+  const faceEngine = createFakeEngine((jpeg) => ({
+    ...GOOD,
+    embedding: fakeEmbedding(jpeg),
+    real: jpeg[0]! === 9 ? 0.1 : 0.95,
+  }));
   const { deps } = testApp();
   const app = (await import('../src/app')).createApp({ ...deps, faceEngine });
   const worker = await seedMember(co.companyId, 'site_engineer', 'w@alpha.test', { app });

@@ -12,6 +12,7 @@ import {
   type FaceEngine,
 } from '../src/attendance/face/engine';
 import { createFakeEngine } from '../src/attendance/face/fake';
+import { meanAbsDiff, NEAR_IDENTICAL_MAD } from '../src/attendance/face/frames';
 import { AppError } from '../src/http/errors';
 
 /** The installed @vladmandic/human package directory (its exports map blocks package.json). */
@@ -43,6 +44,28 @@ describe('human face engine', () => {
     expect(reading).toMatchObject({ faces: 0, embedding: null });
     expect(globalThis.fetch).toBe(realFetch); // the file:// patch is only in place during load
   });
+
+  it(
+    'gives every photo a 32×32 greyscale thumb for the replay check',
+    { timeout: 15_000 },
+    async () => {
+      const grey = await engine.read(await greyJpeg(200));
+      expect(grey.thumb).toHaveLength(1024);
+      expect(Math.abs(grey.thumb![0]! - 128)).toBeLessThan(4);
+      const dark = await engine.read(
+        await sharp({
+          create: { width: 300, height: 200, channels: 3, background: { r: 20, g: 20, b: 20 } },
+        })
+          .jpeg()
+          .toBuffer(),
+      );
+      expect(dark.thumb).toHaveLength(1024);
+      expect(meanAbsDiff(grey.thumb!, dark.thumb!)).toBeGreaterThan(50);
+      // The same picture re-encoded is near-identical.
+      const again = await engine.read(await greyJpeg(260));
+      expect(meanAbsDiff(grey.thumb!, again.thumb!)).toBeLessThan(NEAR_IDENTICAL_MAD);
+    },
+  );
 
   it('rejects bytes that are not an image', { timeout: 15_000 }, async () => {
     const err = await engine.read(Buffer.from('not a jpeg at all')).catch((e: unknown) => e);
@@ -154,7 +177,7 @@ describe('fileFetch (model loading)', () => {
 });
 
 describe('fake face engine', () => {
-  it('returns one face with a fixed embedding by default', async () => {
+  it('returns one clear face of the fake person by default', async () => {
     const engine = createFakeEngine();
     const r = await engine.read(Buffer.from('anything'));
     expect(r.faces).toBe(1);
@@ -164,7 +187,7 @@ describe('fake face engine', () => {
 
   it('uses the supplied mapping', async () => {
     const reading = { faces: 2, minFaceWidth: 50, embedding: null, real: 0.1, live: 0.2 };
-    const engine = createFakeEngine(() => reading);
-    expect(await engine.read(Buffer.alloc(1))).toEqual(reading);
+    const engine = createFakeEngine(() => ({ ...reading, thumb: null }));
+    expect(await engine.read(Buffer.alloc(1))).toEqual({ ...reading, thumb: null });
   });
 });

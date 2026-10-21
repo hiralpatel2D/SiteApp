@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { DEFAULT_FACE_THRESHOLDS, type FaceThresholds } from '@sitediary/shared';
 
 export type Config = {
   nodeEnv: 'development' | 'test' | 'production';
@@ -25,6 +26,8 @@ export type Config = {
   faceTemplateKey: Buffer;
   /** Face recognition engine; `fake` is for e2e tests only and refused in production. */
   faceEngine: 'human' | 'fake';
+  /** Face match / liveness minimums (FACE_MATCH_MIN, FACE_LIVENESS_MIN; 0..1). */
+  faceThresholds: FaceThresholds;
 };
 
 /**
@@ -65,6 +68,8 @@ const schema = z.object({
   BOOTSTRAP_OWNER_PASSWORD: z.string().optional(),
   FACE_TEMPLATE_KEY: z.string().optional(),
   API_FACE_ENGINE: z.enum(['human', 'fake']).default('human'),
+  FACE_MATCH_MIN: z.coerce.number().min(0).max(1).default(DEFAULT_FACE_THRESHOLDS.minSimilarity),
+  FACE_LIVENESS_MIN: z.coerce.number().min(0).max(1).default(DEFAULT_FACE_THRESHOLDS.minLiveness),
 });
 
 function invalid(name: string): Error {
@@ -150,5 +155,6 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
     ),
     faceTemplateKey: loadFaceTemplateKey(e.FACE_TEMPLATE_KEY, e.NODE_ENV),
     faceEngine: loadFaceEngine(e.API_FACE_ENGINE, e.NODE_ENV),
+    faceThresholds: { minSimilarity: e.FACE_MATCH_MIN, minLiveness: e.FACE_LIVENESS_MIN },
   };
 }

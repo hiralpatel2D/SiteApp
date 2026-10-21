@@ -1,7 +1,12 @@
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { and, asc, eq } from 'drizzle-orm';
-import { faceRegistrationBodySchema, newId } from '@sitediary/shared';
+import {
+  faceRegistrationBodySchema,
+  MIN_FACE_WIDTH_PX,
+  newId,
+  REGISTRATION_PHOTO_FRAME,
+} from '@sitediary/shared';
 import { writeAudit } from '../audit/audit';
 import type { AppEnv } from '../auth/session';
 import type { Config } from '../config';
@@ -10,18 +15,15 @@ import type { AppTx } from '../db/tenant';
 import { parseBody } from '../http/body';
 import { isUniqueViolation } from '../db/errors';
 import { AppError } from '../http/errors';
-import { rateLimit } from '../http/rate-limit';
 import { forbidden } from '../roles/authz';
 import { requireCap, runInTenant, type Tenant, type TenantEnv } from '../tenant/context';
 import type { FaceEngine, FaceReading } from './face/engine';
+import { framesDistinct, SAME_PERSON_MIN } from './face/frames';
+import { ipBackstop, memberLimit } from './limits';
 import { averageEmbedding, encryptTemplate } from './face/template';
 import { sharesProject } from './reach';
 
 const REGISTER_LIMIT = { max: 5, windowMs: 60_000 };
-const MIN_FACE_WIDTH = 160;
-const MIN_SCORE = 0.6;
-const MIN_AGREEMENT = 0.5;
-const PHOTO_FRAME = 2;
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -38,12 +40,18 @@ const notConsistent = () =>
     'face_not_consistent',
     'The photos do not match each other. Keep your face in view and try again.',
   );
+const identical = () =>
+  new AppError(
+    422,
+    'frames_identical',
+    'Hold the phone steady and try again — the photos looked identical.',
+  );
 
-const isClear = (r: FaceReading) =>
+const isClear = (r: FaceReading, minLiveness: number) =>
   r.faces === 1 &&
-  r.minFaceWidth >= MIN_FACE_WIDTH &&
-  r.real >= MIN_SCORE &&
-  r.live >= MIN_SCORE &&
+  r.minFaceWidth >= MIN_FACE_WIDTH_PX &&
+  r.real >= minLiveness &&
+  r.live >= minLiveness &&
   r.embedding !== null;
 
 export type FaceStatus = 'none' | 'pending' | 'approved' | 'rejected';
@@ -90,7 +98,8 @@ export function registrationRoutes({ config, faceEngine }: RegistrationDeps): Ho
 
   r.post(
     '/',
-    rateLimit(REGISTER_LIMIT),
+    ipBackstop(),
+    memberLimit(REGISTER_LIMIT),
     requireCap('attendance.view'),
     bodyLimit({
       maxSize: MAX_BODY_BYTES,
@@ -104,11 +113,13 @@ export function registrationRoutes({ config, faceEngine }: RegistrationDeps): Ho
       const jpegs = body.frames.map((f) => Buffer.from(f, 'base64'));
       const readings: FaceReading[] = [];
       for (const jpeg of jpegs) readings.push(await faceEngine.read(jpeg));
-      if (!readings.every(isClear)) throw notClear();
+      if (!readings.every((x) => isClear(x, config.faceThresholds.minLiveness))) throw notClear();
+      // A replayed photo (or one photo sent five times) is not a live registration.
+      if (!framesDistinct(jpegs, readings, faceEngine)) throw identical();
       const embeddings = readings.map((x) => x.embedding!);
       for (let i = 0; i < embeddings.length; i++) {
         for (let j = i + 1; j < embeddings.length; j++) {
-          if (faceEngine.similarity(embeddings[i]!, embeddings[j]!) < MIN_AGREEMENT) {
+          if (faceEngine.similarity(embeddings[i]!, embeddings[j]!) < SAME_PERSON_MIN) {
             throw notConsistent();
           }
         }
@@ -138,7 +149,7 @@ export function registrationRoutes({ config, faceEngine }: RegistrationDeps): Ho
             template,
             modelVersion: faceEngine.modelVersion,
             consentAt: new Date(),
-            photo: jpegs[PHOTO_FRAME]!,
+            photo: jpegs[REGISTRATION_PHOTO_FRAME]!,
             createdBy: t.userId,
             updatedBy: t.userId,
           });
