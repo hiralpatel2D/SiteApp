@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Link, createFileRoute } from '@tanstack/react-router';
 import { ATTENDANCE_TZ, distanceMeters } from '@sitediary/shared';
-import { ApiError, api, errorMessage } from '../lib/api';
+import { ApiError, errorMessage } from '../lib/api';
 import {
   getSettings,
   getToday,
@@ -14,10 +14,12 @@ import {
   type TodayEntry,
 } from '../lib/attendance';
 import { getActiveProject, type Project } from '../lib/project';
-import { AppShell, useCan, useShell } from '../components/AppShell';
+import { AppShell, useShell } from '../components/AppShell';
 import { Icon } from '../components/icons';
 import { Alert, Loading, primaryButton, secondaryButton } from '../components/ui';
 import { CameraCheck } from '../attendance/CameraCheck';
+import { timeOf } from '../attendance/time';
+import { useActiveProjects } from '../attendance/useProjects';
 
 export const Route = createFileRoute('/attendance')({ component: Attendance });
 
@@ -49,26 +51,7 @@ function Attendance() {
 /** Ruling R4: Home's active project, else the first active project. */
 function useProject(): { project: Project | null | undefined; error: string } {
   const { ctx } = useShell();
-  const canSeeProjects = useCan('projects.view');
-  const [projects, setProjects] = useState<Project[] | null>(canSeeProjects ? null : []);
-  const [error, setError] = useState('');
-
-  useEffect(() => {
-    if (!canSeeProjects) return;
-    let live = true;
-    api<Project[]>('/api/projects').then(
-      (list) => live && setProjects(list.filter((p) => p.status === 'active')),
-      (err: unknown) => {
-        if (!live) return;
-        setProjects([]);
-        setError(errorMessage(err));
-      },
-    );
-    return () => {
-      live = false;
-    };
-  }, [canSeeProjects]);
-
+  const { projects, error } = useActiveProjects();
   if (projects === null || !ctx) return { project: undefined, error };
   const active = getActiveProject(ctx.company.id);
   return { project: projects.find((p) => p.id === active) ?? projects[0] ?? null, error };
@@ -258,15 +241,6 @@ function AttendanceBody() {
   );
 }
 
-/** HH:MM (24 h) in the site's timezone. */
-const timeOf = (iso: string, tz: string) =>
-  new Date(iso).toLocaleTimeString(undefined, {
-    hour: '2-digit',
-    minute: '2-digit',
-    hourCycle: 'h23',
-    timeZone: tz,
-  });
-
 function Card({ children }: { children: ReactNode }) {
   return (
     <div className={card}>
@@ -298,10 +272,9 @@ function FaceCard({ face }: { face: Today['face'] }) {
           ? 'Your face registration was not approved. Register again to check in.'
           : 'Register your face once before your first check-in.'}
       </p>
-      {/* The registration page arrives with the next task; a plain link keeps routing typed. */}
-      <a href="/attendance/register" className={`${primaryButton} grid place-items-center`}>
+      <Link to="/attendance/register" className={`${primaryButton} grid place-items-center`}>
         Register your face
-      </a>
+      </Link>
     </div>
   );
 }

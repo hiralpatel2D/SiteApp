@@ -4,36 +4,31 @@ import { ApiError, errorMessage } from '../lib/api';
 import { matchFace } from '../lib/attendance';
 import { secondaryButton } from '../components/ui';
 import { createGuide, type Guide, type GuideState } from './face-guide';
+import {
+  CameraError,
+  CameraPreview,
+  CameraPrompt,
+  CAMERA_FAILED,
+  FRAME_GAP_MS,
+  GUIDE_FAILED,
+  GUIDE_PROMPTS,
+  MAX_GUIDE_FAILURES,
+  TICK_MS,
+  sleep,
+  startCamera,
+} from './camera';
 
-export const CAMERA_BLOCKED =
-  'Camera is blocked. Allow camera for this site in your browser settings.';
-const CAMERA_FAILED = 'The camera could not start. Close other apps using it and try again.';
 const NOT_RECOGNISED = 'Face not recognised. Try again in better light.';
-const GUIDE_FAILED = 'The face check could not start. Check your connection and try again.';
-/** Consecutive guide.next() failures before giving up (models failed to load, etc.). */
-const MAX_GUIDE_FAILURES = 20;
 
 const HOLD_MS = 3000;
-const TICK_MS = 100;
 /** /match is limited to 30 a minute; never ask more often than this. */
 const MATCH_GAP_MS = 2000;
-const FRAME_GAP_MS = 250;
 const FRAMES = 3;
 
-const PROMPTS: Record<Exclude<GuideState['kind'], 'ready'>, string> = {
-  'no-face': 'Look at the camera',
-  'many-faces': 'Only one person in the frame',
-  'too-far': 'Move closer',
-  'too-close': 'Move back a little',
-  'not-centred': 'Centre your face',
-};
-
 function promptFor(s: GuideState): string {
-  if (s.kind !== 'ready') return PROMPTS[s.kind];
+  if (s.kind !== 'ready') return GUIDE_PROMPTS[s.kind];
   return s.blinked ? 'Checking your face…' : 'Blink once';
 }
-
-const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 type Props = {
   /** Called once with 3 raw base64 JPEG frames after a matched 3-second hold. The camera is already off. */
@@ -64,33 +59,14 @@ export function CameraCheck({ onCaptured, onError, onCancel }: Props) {
 
     async function run() {
       try {
-        stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: 'user' },
-          audio: false,
-        });
+        stream = await startCamera(videoRef.current, () => live);
       } catch (err) {
         if (!live) return;
-        const name = err instanceof DOMException ? err.name : '';
-        cb.current.onError(
-          name === 'NotAllowedError' || name === 'SecurityError' ? CAMERA_BLOCKED : CAMERA_FAILED,
-        );
+        cb.current.onError(err instanceof CameraError ? err.message : CAMERA_FAILED);
         return;
       }
       const video = videoRef.current;
-      if (!live || !video) {
-        stream.getTracks().forEach((t) => t.stop());
-        return;
-      }
-      video.srcObject = stream;
-      try {
-        await video.play();
-      } catch {
-        // Autoplay of a muted inline video is allowed; ignore odd browsers.
-      }
-      if (!live) {
-        stream.getTracks().forEach((t) => t.stop());
-        return;
-      }
+      if (!stream || !video) return;
       guide = createGuide(video);
       let lastMatch = -Infinity;
       let holdStart: number | null = null;
@@ -193,27 +169,8 @@ export function CameraCheck({ onCaptured, onError, onCancel }: Props) {
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="relative mx-auto aspect-[3/4] w-full max-w-[420px] overflow-hidden rounded-[var(--r)] border border-line bg-surface">
-        <video
-          ref={videoRef}
-          autoPlay
-          muted
-          playsInline
-          aria-label="Camera preview"
-          className="size-full -scale-x-100 object-cover"
-        />
-        <div
-          aria-hidden="true"
-          className="pointer-events-none absolute left-1/2 top-1/2 h-[62%] w-[56%] -translate-x-1/2 -translate-y-1/2 rounded-[50%] border-4 border-dashed border-white/80"
-        />
-      </div>
-      <p
-        role="status"
-        aria-live="polite"
-        className="text-center font-display text-[26px] font-extrabold uppercase leading-tight"
-      >
-        {prompt}
-      </p>
+      <CameraPreview videoRef={videoRef} />
+      <CameraPrompt>{prompt}</CameraPrompt>
       {notice && (
         <p role="alert" className="text-center font-medium">
           {notice}
