@@ -214,7 +214,9 @@ function SettingsBody() {
           <select
             id="project"
             value={project.id}
+            disabled={busy}
             onChange={(e) => {
+              stopLocating();
               setChosen(e.target.value);
               setError('');
               setNotice('');
@@ -278,7 +280,7 @@ function SettingsBody() {
                 type="range"
                 min={25}
                 max={1000}
-                step={5}
+                step={1}
                 value={form.radiusM}
                 onChange={(e) => set({ radiusM: Number(e.target.value) })}
                 className="h-11 w-full cursor-pointer accent-[var(--accent)]"

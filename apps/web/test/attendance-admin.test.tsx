@@ -164,7 +164,7 @@ describe('Attendance admin and Home tile', () => {
   });
 
   it('tile turns green after a recorded check-in', async () => {
-    setup(['projects.view'], {
+    setup(['projects.view', 'attendance.view'], {
       [TODAY]: () =>
         json(200, { setUp: true, face: 'approved', checkIn: entry('recorded'), checkOut: null }),
     });
@@ -180,18 +180,37 @@ describe('Attendance admin and Home tile', () => {
   });
 
   it('tile shows Pending approval chip', async () => {
-    setup(['projects.view'], {
+    setup(['projects.view', 'attendance.view'], {
       [TODAY]: () =>
         json(200, { setUp: true, face: 'approved', checkIn: entry('pending'), checkOut: null }),
     });
     renderAt('/home');
     const tile = await screen.findByRole('link', { name: /Self Attendance/ });
-    expect(await within(tile).findByText('Pending approval')).toBeTruthy();
+    const chip = await within(tile).findByText('Pending approval');
+    // Small text stays on the text colour; amber is the border and a decorative dot.
+    expect(chip.className).toContain('text-text');
+    expect(chip.className).toContain('border-warn');
+    expect(chip.className).not.toContain('text-warn');
+    expect(chip.querySelector('[aria-hidden="true"]')?.className).toContain('bg-warn');
     expect(tile.className).not.toContain('bg-good-bg');
   });
 
+  it('tile stays a Coming soon card without attendance.view', async () => {
+    const calls = setup(['projects.view'], {
+      [TODAY]: () =>
+        json(200, { setUp: true, face: 'approved', checkIn: entry('recorded'), checkOut: null }),
+    });
+    renderAt('/home');
+    expect(await screen.findByRole('heading', { name: 'Riverside Tower' })).toBeTruthy();
+    const tiles = screen.getByRole('list', { name: 'Modules' });
+    expect(within(tiles).getByRole('heading', { name: 'Self Attendance' })).toBeTruthy();
+    expect(screen.queryByRole('link', { name: /Self Attendance/ })).toBeNull();
+    expect(within(tiles).getAllByText('Coming soon')).toHaveLength(12);
+    expect(calls[TODAY]).toBeUndefined();
+  });
+
   it('tile says when attendance is not set up or nothing is marked', async () => {
-    setup(['projects.view'], {
+    setup(['projects.view', 'attendance.view'], {
       [TODAY]: () => json(200, { setUp: false, face: 'none', checkIn: null, checkOut: null }),
     });
     renderAt('/home');
@@ -403,7 +422,7 @@ describe('Register face', () => {
     renderAt('/attendance/register');
     expect(
       await screen.findByText(
-        "Site Diary stores a numeric face code (not your photo) to confirm it's you at check-in. A senior approves it once. You can delete it any time from this page.",
+        "Site Diary keeps a numeric face code to confirm it's you at check-in. One photo is kept until a senior approves or rejects your registration, then deleted. To remove your face code, ask your company admin to request deletion from Site Diary support.",
       ),
     ).toBeTruthy();
     await userEvent.click(screen.getByRole('button', { name: 'I agree' }));
@@ -434,5 +453,56 @@ describe('Register face', () => {
       }),
     ).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Try again' })).toBeTruthy();
+  });
+
+  it('on a 409 shows the current status instead of Try again', async () => {
+    let faceLoads = 0;
+    setup([], {
+      'GET /api/attendance/face/me': () =>
+        json(200, { status: ++faceLoads === 1 ? 'none' : 'pending' }),
+      'POST /api/attendance/face': () =>
+        json(409, {
+          error: {
+            code: 'registration_in_progress',
+            message: 'A registration is already being processed.',
+          },
+        }),
+    });
+    renderAt('/attendance/register');
+    await userEvent.click(await screen.findByRole('button', { name: 'I agree' }));
+    expect(
+      await screen.findByText(
+        'Your face registration is waiting for approval by a senior.',
+        undefined,
+        { timeout: 4000 },
+      ),
+    ).toBeTruthy();
+    expect(screen.getByText('A registration is already being processed.')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull();
+    expect(faceLoads).toBe(2);
+  });
+
+  it('Cancel releases the camera', async () => {
+    guide.states = [{ kind: 'no-face' }];
+    const calls = setup([], {
+      'GET /api/attendance/face/me': () => json(200, { status: 'none' }),
+    });
+    renderAt('/attendance/register');
+    await userEvent.click(await screen.findByRole('button', { name: 'I agree' }));
+    expect(await screen.findByText('Look at the camera')).toBeTruthy();
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(await screen.findByRole('button', { name: 'I agree' })).toBeTruthy();
+    expect(guide.stop).toHaveBeenCalled();
+    expect(calls['POST /api/attendance/face']).toBeUndefined();
+  });
+
+  it('leaving the page releases the camera', async () => {
+    guide.states = [{ kind: 'no-face' }];
+    setup([], { 'GET /api/attendance/face/me': () => json(200, { status: 'none' }) });
+    const router = renderAt('/attendance/register');
+    await userEvent.click(await screen.findByRole('button', { name: 'I agree' }));
+    expect(await screen.findByText('Look at the camera')).toBeTruthy();
+    await router.navigate({ to: '/home' });
+    await waitFor(() => expect(guide.stop).toHaveBeenCalled());
   });
 });

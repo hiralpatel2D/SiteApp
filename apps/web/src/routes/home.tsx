@@ -67,6 +67,7 @@ function Home() {
 function HomeBody() {
   const { ctx } = useShell();
   const canSeeProjects = useCan('projects.view');
+  const canAttend = useCan('attendance.view');
   const [tab, setTab] = useState<Tab>('today');
   const [projects, setProjects] = useState<Project[] | null>(canSeeProjects ? null : []);
   const [error, setError] = useState('');
@@ -119,7 +120,7 @@ function HomeBody() {
             <ul aria-label="Modules" className="grid grid-cols-2 gap-3 lg:grid-cols-3">
               {MODULES.map((m, k) => (
                 <li key={m.id} style={{ '--i': k } as CSSProperties} className={`flex ${rise}`}>
-                  {m.id === 'attendance' ? (
+                  {m.id === 'attendance' && canAttend ? (
                     <AttendanceTile
                       name={m.name}
                       icon={m.icon}
@@ -223,7 +224,8 @@ function AttendanceTile({
         <p className="text-muted">Loading…</p>
       )}
       {status?.pending && (
-        <span className="self-start rounded-full border border-warn px-2.5 py-0.5 font-mono text-[11px] font-semibold uppercase tracking-widest text-warn">
+        <span className="inline-flex items-center gap-1.5 self-start rounded-full border border-warn px-2.5 py-0.5 font-mono text-[11px] font-semibold uppercase tracking-widest text-text">
+          <span aria-hidden="true" className="size-2 rounded-full bg-warn" />
           Pending approval
         </span>
       )}

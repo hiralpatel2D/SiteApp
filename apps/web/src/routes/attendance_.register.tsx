@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Link, createFileRoute } from '@tanstack/react-router';
-import { errorMessage } from '../lib/api';
+import { ApiError, errorMessage } from '../lib/api';
 import { getMyFace, registerFace, type FaceStatus } from '../lib/attendance';
 import { AppShell } from '../components/AppShell';
 import { Alert, Loading, primaryButton, secondaryButton } from '../components/ui';
@@ -10,7 +10,7 @@ import { FaceCapture } from '../attendance/FaceCapture';
 export const Route = createFileRoute('/attendance_/register')({ component: RegisterFace });
 
 const CONSENT =
-  "Site Diary stores a numeric face code (not your photo) to confirm it's you at check-in. A senior approves it once. You can delete it any time from this page.";
+  "Site Diary keeps a numeric face code to confirm it's you at check-in. One photo is kept until a senior approves or rejects your registration, then deleted. To remove your face code, ask your company admin to request deletion from Site Diary support.";
 const SENT = 'Sent for approval. Ask your senior to approve it now.';
 
 const card = 'flex flex-col gap-3 rounded-[var(--r)] border border-line-soft bg-card p-4';
@@ -34,6 +34,7 @@ function RegisterBody() {
   const [face, setFace] = useState<FaceStatus | null>(null);
   const [loadError, setLoadError] = useState('');
   const [step, setStep] = useState<Step>({ kind: 'consent' });
+  const [notice, setNotice] = useState('');
 
   useEffect(() => {
     let live = true;
@@ -53,6 +54,20 @@ function RegisterBody() {
       setFace('pending');
       setStep({ kind: 'done' });
     } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        // e.g. registration_in_progress: show where things stand instead of a doomed retry.
+        try {
+          const { status } = await getMyFace();
+          setFace(status);
+          if (status === 'pending' || status === 'approved') {
+            setNotice(errorMessage(err));
+            setStep({ kind: 'consent' });
+            return;
+          }
+        } catch {
+          // Fall through to the message below.
+        }
+      }
       setStep({ kind: 'failed', message: errorMessage(err) });
     }
   }
@@ -73,6 +88,7 @@ function RegisterBody() {
   if (face === 'approved') {
     return (
       <Card>
+        <Alert>{notice}</Alert>
         <p className="font-medium">Your face is registered. You can check in.</p>
         <BackToAttendance />
       </Card>
@@ -81,6 +97,7 @@ function RegisterBody() {
   if (face === 'pending') {
     return (
       <Card>
+        <Alert>{notice}</Alert>
         <p className="font-medium">Your face registration is waiting for approval by a senior.</p>
         <BackToAttendance />
       </Card>
