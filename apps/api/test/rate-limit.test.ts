@@ -47,4 +47,19 @@ describe('rateLimit middleware', () => {
     });
     expect((await hit('203.0.113.2')).status).toBe(200);
   });
+
+  it('keys on a custom key when given one (e.g. the tenant member)', async () => {
+    const a = new Hono();
+    a.onError(errorHandler);
+    a.get(
+      '/x',
+      rateLimit({ max: 1, windowMs: 60_000, key: (c) => c.req.header('x-who') ?? 'none' }),
+      (c) => c.text('ok'),
+    );
+    const hit = (who: string) =>
+      a.request('/x', { headers: { 'x-client-ip': '203.0.113.9', 'x-who': who } });
+    expect((await hit('a')).status).toBe(200);
+    expect((await hit('a')).status).toBe(429);
+    expect((await hit('b')).status).toBe(200);
+  });
 });

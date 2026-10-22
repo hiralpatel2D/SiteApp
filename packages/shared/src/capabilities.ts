@@ -1,3 +1,5 @@
+import { ATTENDANCE_CAPABILITIES, type AttendanceCapability } from './attendance';
+
 export const MODULE_IDS = [
   'attendance',
   'manpower',
@@ -29,9 +31,10 @@ export const CORE_CAPABILITIES = [
 export type CoreCapability = (typeof CORE_CAPABILITIES)[number];
 
 export type ModuleCapability = `${ModuleId}.view`;
-export type Capability = CoreCapability | ModuleCapability;
+export type Capability = CoreCapability | ModuleCapability | AttendanceCapability;
 
 export const CAPABILITIES: readonly Capability[] = [
   ...CORE_CAPABILITIES,
   ...MODULE_IDS.map((m): ModuleCapability => `${m}.view`),
+  ...ATTENDANCE_CAPABILITIES,
 ];

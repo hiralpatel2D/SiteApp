@@ -1,9 +1,8 @@
 import { randomInt } from 'node:crypto';
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
+import { OWNER, ensureOwner } from './owner';
 
 // Runs against the real API and the local test database (see playwright.config.ts).
-const ORIGIN = 'http://localhost:4173';
-const OWNER = { email: 'owner@sitediary.test', password: 'owner-password-123', name: 'Owner' };
 
 test.describe.configure({ mode: 'serial' });
 
@@ -13,15 +12,7 @@ async function freshIp(context: BrowserContext): Promise<void> {
   await context.setExtraHTTPHeaders({ 'x-client-ip': ip });
 }
 
-test.beforeAll(async ({ request }) => {
-  // The owner's email is in PLATFORM_ADMIN_EMAILS, so public sign-up is allowed.
-  // A 403 means the account already exists (the e2e setup empties the DB first).
-  const res = await request.post('/api/auth/sign-up/email', {
-    headers: { origin: ORIGIN },
-    data: OWNER,
-  });
-  expect([200, 403]).toContain(res.status());
-});
+test.beforeAll(async ({ request }) => ensureOwner(request));
 
 test.beforeEach(async ({ context }) => freshIp(context));
 

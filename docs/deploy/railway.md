@@ -56,6 +56,9 @@ Both services use the GitHub repo `hiralpatel2D/SiteApp`, branch `main`, root di
 
 | `BOOTSTRAP_OWNER_EMAIL`    | Optional, see **First owner login**. The owner's email; it must also be in `PLATFORM_ADMIN_EMAILS`. |
 | `BOOTSTRAP_OWNER_PASSWORD` | Optional, see **First owner login**. A temporary password (at least 8 characters). Delete it after the first sign-in. |
+| `FACE_TEMPLATE_KEY`        | Required: from the attendance release onwards `api` **will not start** in production without it, so add it before deploying. A random 32-byte key, base64-encoded, that encrypts the stored face templates used for attendance. Generate it with `openssl rand -base64 32` and use a different one in each environment. **Never change or lose it**: templates saved with the old key can no longer be read, and every worker would have to enrol again. |
+| `FACE_MATCH_MIN`           | Optional, default `0.50`. The lowest face match score (0 to 1) that records a check-in; lower scores go to Pending as "Face not matched". Raise it if a colleague is ever recorded as someone else. |
+| `FACE_LIVENESS_MIN`        | Optional, default `0.60`. The lowest anti-spoof and liveness score (0 to 1), taken from the weakest of the three photos; lower scores go to Pending as "Liveness failed". Raise it if a printed or on-screen photo is ever recorded. |
 
 **`web` service**
 
@@ -64,6 +67,19 @@ Both services use the GitHub repo `hiralpatel2D/SiteApp`, branch `main`, root di
 | `API_INTERNAL_URL` | `http://${{api.RAILWAY_PRIVATE_DOMAIN}}:${{api.PORT}}` |
 
 Type the `${{ ... }}` parts exactly. Railway fills them in itself, and in each environment it uses that environment's own database.
+
+**Memory.** Face recognition for attendance runs inside `api`, so the `api` service needs about **350 MB** of memory. Check its memory limit in the service settings. The face models load on the first attendance photo, which takes under a second.
+
+## Attendance go-live checklist
+
+- **Set `FACE_TEMPLATE_KEY` on `api` before deploying** the attendance release (see **Variables**). Without it `api` will not start.
+- **Never set `API_FACE_ENGINE`** in production. It exists only for automated tests (`fake` skips real face checks), and `api` refuses to start in production with `API_FACE_ENGINE=fake`.
+- **Nothing to download or upload for the face models.** They ship inside the build: the server's with `api`, the phone's with `web`.
+- **The first check-in on each phone is slower.** It loads the face library (about 1.5 MB of JavaScript plus about 4.5 MB of models) once; after that the phone keeps it cached. On a weak site signal, do the first check-in on Wi-Fi if possible.
+- Give `api` about **350 MB** of memory (see **Memory** above).
+- **Spoof test before inviting staff (go-live gate).** On a real phone, with a registered and approved person: try to check in by holding up (1) a printed photo of that person and (2) their photo or video replayed on another phone's screen. **Both must go to Pending, never Recorded.** Write down the date, the phones used and the result of each try (Recorded or Pending, and the reasons shown) in the release notes. If either is recorded, raise `FACE_LIVENESS_MIN` (and if needed `FACE_MATCH_MIN`), redeploy and repeat before anyone is invited.
+- **Accuracy test before inviting staff (go-live gate).** Also on real phones: (a) **different person:** a colleague tries to check in against someone else's approved registration. It **must not match**, and it goes to Pending as "Face not matched". (b) **Genuine use:** the registered person does **5 normal check-ins** (or check-in/out pairs on a test project). **All 5 must be Recorded**, with no false "Liveness failed" or "Face not matched". Write down each result (Recorded or Pending, the reasons, the phone) in the release notes. Both thresholds can be changed without a code change: `FACE_MATCH_MIN` (raise it if (a) matched, lower it carefully if (b) shows "Face not matched") and `FACE_LIVENESS_MIN` (lower it carefully if (b) shows "Liveness failed", but only if the spoof test above still goes to Pending). Redeploy and repeat both tests after any change.
+- **Known limit (Stage A).** The phone, not the server, picks the head-turn prompts. Someone with a stolen sign-in and genuine old selfies of a colleague could write a script that gets a check-in recorded. Reviewers can see every entry and its audit trail, and every face is approved by a senior; Stage B adds a server-issued challenge.
 
 ## First owner login
 

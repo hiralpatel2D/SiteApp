@@ -3,6 +3,8 @@ import { createPortal } from 'react-dom';
 import type { CSSProperties } from 'react';
 import { Link, createFileRoute } from '@tanstack/react-router';
 import { api, errorMessage } from '../lib/api';
+import { getToday, type Today } from '../lib/attendance';
+import { timeOf } from '../attendance/time';
 import { getActiveProject, setActiveProject, type Project } from '../lib/project';
 import { AppShell, useCan, useShell } from '../components/AppShell';
 import { Icon, type IconName } from '../components/icons';
@@ -10,7 +12,7 @@ import { Alert, primaryButton } from '../components/ui';
 
 export const Route = createFileRoute('/home')({ component: Home });
 
-/** The site modules, in the demo's order. None is built yet. */
+/** The site modules, in the demo's order. Only Self Attendance is built so far. */
 const MODULES: { id: string; name: string; icon: IconName }[] = [
   { id: 'attendance', name: 'Self Attendance', icon: 'clock' },
   { id: 'manpower', name: 'Manpower & Trades', icon: 'users' },
@@ -49,6 +51,9 @@ const TABS: { id: Tab; label: string; icon: IconName; empty: string }[] = [
   },
 ];
 
+const tile =
+  'flex min-h-[132px] w-full flex-col gap-1.5 rounded-[var(--r)] border border-line-soft p-4 shadow-[0_1px_2px_color-mix(in_srgb,var(--text)_6%,transparent)]';
+
 const rise = 'animate-[rise_.55s_var(--ease-out)_both] [animation-delay:calc(var(--i,0)*40ms)]';
 
 function Home() {
@@ -62,6 +67,7 @@ function Home() {
 function HomeBody() {
   const { ctx } = useShell();
   const canSeeProjects = useCan('projects.view');
+  const canAttend = useCan('attendance.view');
   const [tab, setTab] = useState<Tab>('today');
   const [projects, setProjects] = useState<Project[] | null>(canSeeProjects ? null : []);
   const [error, setError] = useState('');
@@ -113,20 +119,21 @@ function HomeBody() {
             {projects && projects.length === 0 && !error && <NoProjects />}
             <ul aria-label="Modules" className="grid grid-cols-2 gap-3 lg:grid-cols-3">
               {MODULES.map((m, k) => (
-                <li
-                  key={m.id}
-                  style={{ '--i': k } as CSSProperties}
-                  className={`flex min-h-[132px] flex-col gap-1.5 rounded-[var(--r)] border border-line-soft bg-card p-4 shadow-[0_1px_2px_color-mix(in_srgb,var(--text)_6%,transparent)] ${rise}`}
-                >
-                  <span className="mb-2 grid size-[46px] place-items-center rounded-[12px] bg-icon-bg text-icon-fg">
-                    <Icon name={m.icon} />
-                  </span>
-                  <h3 className="font-display text-[20px] font-extrabold uppercase leading-[1.02]">
-                    {m.name}
-                  </h3>
-                  <p className="font-mono text-[11px] uppercase tracking-widest text-muted">
-                    Coming soon
-                  </p>
+                <li key={m.id} style={{ '--i': k } as CSSProperties} className={`flex ${rise}`}>
+                  {m.id === 'attendance' && canAttend ? (
+                    <AttendanceTile
+                      name={m.name}
+                      icon={m.icon}
+                      projectId={projects === null ? undefined : (current?.id ?? null)}
+                    />
+                  ) : (
+                    <div className={`${tile} bg-card`}>
+                      <TileHead name={m.name} icon={m.icon} />
+                      <p className="font-mono text-[11px] uppercase tracking-widest text-muted">
+                        Coming soon
+                      </p>
+                    </div>
+                  )}
                 </li>
               ))}
             </ul>
@@ -145,6 +152,88 @@ function HomeBody() {
 
       <TabBar tab={tab} onTab={setTab} />
     </div>
+  );
+}
+
+function TileHead({ name, icon }: { name: string; icon: IconName }) {
+  return (
+    <>
+      <span className="mb-2 grid size-[46px] place-items-center rounded-[12px] bg-icon-bg text-icon-fg">
+        <Icon name={icon} />
+      </span>
+      <h3 className="font-display text-[20px] font-extrabold uppercase leading-[1.02]">{name}</h3>
+    </>
+  );
+}
+
+type TileStatus = { line: string; good?: boolean; pending?: boolean };
+
+/** Today's attendance in one line, from the latest of check-in and check-out. */
+function tileStatus(t: Today): TileStatus {
+  if (!t.setUp) return { line: 'Not set up for this project' };
+  if (!t.checkIn && !t.checkOut) {
+    if (t.face === 'none' || t.face === 'rejected') return { line: 'Register your face' };
+    if (t.face === 'pending') return { line: 'Face registration pending approval' };
+  }
+  const latest = t.checkOut
+    ? { label: 'Checked out', e: t.checkOut }
+    : t.checkIn
+      ? { label: 'Checked in', e: t.checkIn }
+      : null;
+  if (!latest) return { line: 'Not checked in' };
+  const line = `${latest.label} ${timeOf(latest.e.at)}`;
+  return latest.e.status === 'pending' ? { line, pending: true } : { line, good: true };
+}
+
+/**
+ * Self Attendance: opens /attendance and shows today's status for the Home project.
+ * `projectId` is undefined while projects load and null when there is none.
+ */
+function AttendanceTile({
+  name,
+  icon,
+  projectId,
+}: {
+  name: string;
+  icon: IconName;
+  projectId: string | null | undefined;
+}) {
+  const [loaded, setLoaded] = useState<{ projectId: string; status: TileStatus } | null>(null);
+
+  useEffect(() => {
+    if (!projectId) return;
+    let live = true;
+    getToday(projectId).then(
+      (t) => live && setLoaded({ projectId, status: tileStatus(t) }),
+      () => live && setLoaded({ projectId, status: { line: 'Tap to open' } }),
+    );
+    return () => {
+      live = false;
+    };
+  }, [projectId]);
+
+  let status: TileStatus | null = null;
+  if (projectId === null) status = { line: 'No project yet' };
+  else if (projectId && loaded?.projectId === projectId) status = loaded.status;
+
+  return (
+    <Link
+      to="/attendance"
+      className={`${tile} cursor-pointer transition-transform duration-300 ease-(--spring) hover:border-accent active:scale-[0.98] ${status?.good ? 'bg-good-bg' : 'bg-card'}`}
+    >
+      <TileHead name={name} icon={icon} />
+      {status ? (
+        <p className={`font-medium ${status.good ? 'text-text' : 'text-muted'}`}>{status.line}</p>
+      ) : (
+        <p className="text-muted">Loading…</p>
+      )}
+      {status?.pending && (
+        <span className="inline-flex items-center gap-1.5 self-start rounded-full border border-warn px-2.5 py-0.5 font-mono text-[11px] font-semibold uppercase tracking-widest text-text">
+          <span aria-hidden="true" className="size-2 rounded-full bg-warn" />
+          Pending approval
+        </span>
+      )}
+    </Link>
   );
 }
 

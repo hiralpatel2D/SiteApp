@@ -30,7 +30,14 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
-      use: { ...devices['Desktop Chrome'], launchOptions: { executablePath } },
+      use: {
+        ...devices['Desktop Chrome'],
+        launchOptions: {
+          executablePath,
+          // A fake camera, allowed without a prompt, so getUserMedia succeeds.
+          args: ['--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'],
+        },
+      },
     },
   ],
   webServer: [
@@ -45,6 +52,8 @@ export default defineConfig({
         PORT: API_PORT,
         APP_BASE_URL: WEB_URL,
         PLATFORM_ADMIN_EMAILS: 'owner@sitediary.test',
+        // Face reading without models: every frame is one live face with the same code.
+        API_FACE_ENGINE: 'fake',
         BETTER_AUTH_SECRET:
           process.env.BETTER_AUTH_SECRET || 'test-only-better-auth-secret-0123456789abcdef',
       },

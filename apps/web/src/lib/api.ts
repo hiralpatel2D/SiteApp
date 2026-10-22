@@ -22,6 +22,8 @@ export type ApiOptions = {
   body?: unknown;
   /** Company id for `x-company-id`; defaults to the active company. */
   company?: string | null;
+  /** Aborting the request rejects with the generic `unavailable` ApiError. */
+  signal?: AbortSignal;
 };
 
 type ErrorBody = { error?: { code?: unknown; message?: unknown; details?: unknown } };
@@ -68,6 +70,7 @@ export async function api<T>(path: string, opts: ApiOptions = {}): Promise<T> {
       headers,
       credentials: 'include',
       body: hasBody ? JSON.stringify(opts.body) : undefined,
+      signal: opts.signal,
     });
   } catch {
     throw new ApiError(0, 'unavailable', UNAVAILABLE);

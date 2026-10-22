@@ -38,13 +38,21 @@ const BASIC: Capability[] = ['company.view', 'projects.view'];
 
 const TABLE: Record<SystemRoleKey, Capability[]> = {
   super_admin: [...CAPABILITIES],
-  admin: [...ALL_CORE, ...views(MODULE_IDS)],
+  admin: [
+    ...ALL_CORE,
+    ...views(MODULE_IDS),
+    'attendance.approve_face',
+    'attendance.review',
+    'attendance.settings',
+    'attendance.export',
+  ],
   coordinator: [
     'company.view',
     'users.view',
     'roles.view',
     'projects.view',
     ...views(MODULE_IDS.filter((m) => m !== 'insights')),
+    'attendance.review',
   ],
   project_manager: [
     'company.view',
@@ -54,6 +62,8 @@ const TABLE: Record<SystemRoleKey, Capability[]> = {
     'projects.manage',
     'audit.view',
     ...views(MODULE_IDS),
+    'attendance.approve_face',
+    'attendance.review',
   ],
   site_engineer: [
     ...BASIC,

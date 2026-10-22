@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { DEFAULT_FACE_THRESHOLDS, type FaceThresholds } from '@sitediary/shared';
 
 export type Config = {
   nodeEnv: 'development' | 'test' | 'production';
@@ -21,7 +22,22 @@ export type Config = {
    * BOOTSTRAP_OWNER_EMAIL/BOOTSTRAP_OWNER_PASSWORD are unset.
    */
   bootstrapOwner: { email: string; password: string } | null;
+  /** AES-256-GCM key (32 bytes) that encrypts stored face templates. */
+  faceTemplateKey: Buffer;
+  /** Face recognition engine; `fake` is for e2e tests only and refused in production. */
+  faceEngine: 'human' | 'fake';
+  /** Face match / liveness minimums (FACE_MATCH_MIN, FACE_LIVENESS_MIN; 0..1). */
+  faceThresholds: FaceThresholds;
 };
+
+/**
+ * Fixed face template key used outside production when FACE_TEMPLATE_KEY is
+ * unset. It is public, so it must never protect real templates.
+ */
+export const DEV_FACE_TEMPLATE_KEY: Buffer = Buffer.from(
+  'site-diary-dev-face-key-INSECURE',
+  'utf8',
+);
 
 /** Minimum length of the temporary bootstrap password (normal passwords need 10). */
 export const MIN_BOOTSTRAP_PASSWORD_LENGTH = 8;
@@ -50,6 +66,10 @@ const schema = z.object({
   PLATFORM_ADMIN_EMAILS: z.string().default(''),
   BOOTSTRAP_OWNER_EMAIL: z.string().optional(),
   BOOTSTRAP_OWNER_PASSWORD: z.string().optional(),
+  FACE_TEMPLATE_KEY: z.string().optional(),
+  API_FACE_ENGINE: z.enum(['human', 'fake']).default('human'),
+  FACE_MATCH_MIN: z.coerce.number().min(0).max(1).default(DEFAULT_FACE_THRESHOLDS.minSimilarity),
+  FACE_LIVENESS_MIN: z.coerce.number().min(0).max(1).default(DEFAULT_FACE_THRESHOLDS.minLiveness),
 });
 
 function invalid(name: string): Error {
@@ -78,9 +98,44 @@ function loadBootstrapOwner(
   return { email, password };
 }
 
+function loadFaceEngine(
+  engine: Config['faceEngine'],
+  nodeEnv: Config['nodeEnv'],
+): Config['faceEngine'] {
+  if (engine === 'fake' && nodeEnv === 'production') {
+    throw new Error(
+      'Invalid environment variable: API_FACE_ENGINE=fake is not allowed in production',
+    );
+  }
+  return engine;
+}
+
+const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/;
+
+function loadFaceTemplateKey(raw: string | undefined, nodeEnv: Config['nodeEnv']): Buffer {
+  if (raw === undefined) {
+    if (nodeEnv === 'production') throw invalid('FACE_TEMPLATE_KEY');
+    return DEV_FACE_TEMPLATE_KEY;
+  }
+  const trimmed = raw.trim();
+  const key = Buffer.from(trimmed, 'base64');
+  if (!BASE64.test(trimmed) || key.length !== 32) {
+    throw new Error(
+      'Invalid environment variable: FACE_TEMPLATE_KEY must be 32 bytes, base64-encoded',
+    );
+  }
+  return key;
+}
+
 export function loadConfig(env: Record<string, string | undefined>): Config {
-  // Treat empty strings as unset so defaults apply.
-  const cleaned = Object.fromEntries(Object.entries(env).filter(([, v]) => v !== ''));
+  // Treat empty strings as unset so defaults apply; the face thresholds are also trimmed,
+  // so a whitespace-only value is unset too (not coerced to 0).
+  const trimmed = new Set(['FACE_MATCH_MIN', 'FACE_LIVENESS_MIN']);
+  const cleaned = Object.fromEntries(
+    Object.entries(env)
+      .map(([k, v]) => [k, trimmed.has(k) ? v?.trim() : v] as const)
+      .filter(([, v]) => v !== ''),
+  );
   const result = schema.safeParse(cleaned);
   if (!result.success) {
     const name = String(result.error.issues[0]?.path[0] ?? 'environment');
@@ -104,5 +159,8 @@ export function loadConfig(env: Record<string, string | undefined>): Config {
       e.BOOTSTRAP_OWNER_PASSWORD,
       platformAdminEmails,
     ),
+    faceTemplateKey: loadFaceTemplateKey(e.FACE_TEMPLATE_KEY, e.NODE_ENV),
+    faceEngine: loadFaceEngine(e.API_FACE_ENGINE, e.NODE_ENV),
+    faceThresholds: { minSimilarity: e.FACE_MATCH_MIN, minLiveness: e.FACE_LIVENESS_MIN },
   };
 }

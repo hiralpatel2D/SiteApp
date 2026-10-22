@@ -1,7 +1,7 @@
 # Site Diary — Self Attendance (Geofence + Face) Design
 
 **Date:** 2026-10-15
-**Status:** Draft, awaiting owner review (a clickable demo comes before any build)
+**Status:** Approved by the owner on 2026-10-16. Build plan: `docs/superpowers/plans/2026-10-16-attendance-stage-a.md` (Stage A), with Stage B to follow.
 **Builds on:** `docs/superpowers/specs/2026-10-13-site-diary-core-design.md` (core platform) and the live Plan 2 code (auth, companies, roles, projects, audit)
 
 ---
@@ -112,6 +112,10 @@ A project without a site location shows on the tile as "Attendance not set up fo
 | Mock location | The browser cannot reliably detect mock-GPS apps. The server flags impossible jumps and implausibly perfect accuracy, and very poor accuracy readings, and sends them to Pending. The face check stays the second wall. |
 | Accuracy limits | No face system is perfect. Near-threshold cases go to Pending rather than being rejected. False rejects are cheap (a reviewer approves); false accepts are what we design against. |
 
+### Known limits (Stage A)
+
+The pose prompts (blink, turn left, turn right) are chosen and checked on the phone; the server does not issue its own challenge. A scripted client with a stolen session and genuine old selfies of a colleague could therefore be recorded: the server rejects replayed or identical frames, frames of different people and low anti-spoof or liveness scores, but it cannot prove the photos were taken just now. The mitigations in Stage A are the reviewer audit trail, the face approval by a senior, and the configurable match and liveness thresholds (`FACE_MATCH_MIN`, `FACE_LIVENESS_MIN`). Stage B adds a server-issued pose challenge (a one-time nonce the frames must answer). Before staff are invited, a printed photo and a phone-screen replay of a registered person must be tried on a real phone and must go to Pending (see the deploy checklist).
+
 ## 9. Data model (new tenant tables, all under RLS with the core column set)
 
 - `attendance_settings` (per project): lat, lng, radius_m, start_time, late_after_min, reminder_time, timezone.
@@ -148,6 +152,9 @@ Every insert, approval and rejection writes an audit row.
 | Tile | Unique icon on top; turns green only when attendance is marked |
 | Face flow | Screen turns green on recognition; hold 3 seconds to confirm; then a confirmation of the action taken |
 | Management view | Today summary, people list, pending queue, monthly calendar with Excel export |
+| Working days | **Every day.** Construction sites work all week, so there are no weekly offs or holidays in the calendar. A day without a check-in is absent. |
+| Libraries | Use relevant open-source GitHub projects. Face detection, recognition, anti-spoof and liveness use **vladmandic/human** (MIT): light models in the browser for guidance, and the decision on the server. Thresholds come from its Face ID demo. |
+| Green screen | The screen turns green only after the **server** confirms the face matches (one frame sent for a quick match). The 3-second hold then captures 3 frames, and the server re-checks everything before recording. |
 
 ## 12. Claude's calls (owner to check)
 

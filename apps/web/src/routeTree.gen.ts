@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AttendanceRouteImport } from './routes/attendance'
 import { Route as ChangePasswordRouteImport } from './routes/change-password'
 import { Route as CompaniesRouteImport } from './routes/companies'
 import { Route as HomeRouteImport } from './routes/home'
@@ -18,11 +19,19 @@ import { Route as ProjectsRouteImport } from './routes/projects'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as SetupRouteImport } from './routes/setup'
 import { Route as TeamRouteImport } from './routes/team'
+import { Route as AttendanceApprovalsRouteImport } from './routes/attendance_.approvals'
+import { Route as AttendanceRegisterRouteImport } from './routes/attendance_.register'
+import { Route as AttendanceSettingsRouteImport } from './routes/attendance_.settings'
 import { Route as InviteTokenRouteImport } from './routes/invite.$token'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AttendanceRoute = AttendanceRouteImport.update({
+  id: '/attendance',
+  path: '/attendance',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ChangePasswordRoute = ChangePasswordRouteImport.update({
@@ -65,6 +74,21 @@ const TeamRoute = TeamRouteImport.update({
   path: '/team',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AttendanceApprovalsRoute = AttendanceApprovalsRouteImport.update({
+  id: '/attendance_/approvals',
+  path: '/attendance/approvals',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AttendanceRegisterRoute = AttendanceRegisterRouteImport.update({
+  id: '/attendance_/register',
+  path: '/attendance/register',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AttendanceSettingsRoute = AttendanceSettingsRouteImport.update({
+  id: '/attendance_/settings',
+  path: '/attendance/settings',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const InviteTokenRoute = InviteTokenRouteImport.update({
   id: '/invite/$token',
   path: '/invite/$token',
@@ -73,6 +97,7 @@ const InviteTokenRoute = InviteTokenRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/attendance': typeof AttendanceRoute
   '/change-password': typeof ChangePasswordRoute
   '/companies': typeof CompaniesRoute
   '/home': typeof HomeRoute
@@ -81,10 +106,14 @@ export interface FileRoutesByFullPath {
   '/reset-password': typeof ResetPasswordRoute
   '/setup': typeof SetupRoute
   '/team': typeof TeamRoute
+  '/attendance/approvals': typeof AttendanceApprovalsRoute
+  '/attendance/register': typeof AttendanceRegisterRoute
+  '/attendance/settings': typeof AttendanceSettingsRoute
   '/invite/$token': typeof InviteTokenRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/attendance': typeof AttendanceRoute
   '/change-password': typeof ChangePasswordRoute
   '/companies': typeof CompaniesRoute
   '/home': typeof HomeRoute
@@ -93,11 +122,15 @@ export interface FileRoutesByTo {
   '/reset-password': typeof ResetPasswordRoute
   '/setup': typeof SetupRoute
   '/team': typeof TeamRoute
+  '/attendance/approvals': typeof AttendanceApprovalsRoute
+  '/attendance/register': typeof AttendanceRegisterRoute
+  '/attendance/settings': typeof AttendanceSettingsRoute
   '/invite/$token': typeof InviteTokenRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/attendance': typeof AttendanceRoute
   '/change-password': typeof ChangePasswordRoute
   '/companies': typeof CompaniesRoute
   '/home': typeof HomeRoute
@@ -106,12 +139,16 @@ export interface FileRoutesById {
   '/reset-password': typeof ResetPasswordRoute
   '/setup': typeof SetupRoute
   '/team': typeof TeamRoute
+  '/attendance_/approvals': typeof AttendanceApprovalsRoute
+  '/attendance_/register': typeof AttendanceRegisterRoute
+  '/attendance_/settings': typeof AttendanceSettingsRoute
   '/invite/$token': typeof InviteTokenRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/attendance'
     | '/change-password'
     | '/companies'
     | '/home'
@@ -120,10 +157,14 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/setup'
     | '/team'
+    | '/attendance/approvals'
+    | '/attendance/register'
+    | '/attendance/settings'
     | '/invite/$token'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/attendance'
     | '/change-password'
     | '/companies'
     | '/home'
@@ -132,10 +173,14 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/setup'
     | '/team'
+    | '/attendance/approvals'
+    | '/attendance/register'
+    | '/attendance/settings'
     | '/invite/$token'
   id:
     | '__root__'
     | '/'
+    | '/attendance'
     | '/change-password'
     | '/companies'
     | '/home'
@@ -144,11 +189,15 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/setup'
     | '/team'
+    | '/attendance_/approvals'
+    | '/attendance_/register'
+    | '/attendance_/settings'
     | '/invite/$token'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AttendanceRoute: typeof AttendanceRoute
   ChangePasswordRoute: typeof ChangePasswordRoute
   CompaniesRoute: typeof CompaniesRoute
   HomeRoute: typeof HomeRoute
@@ -157,6 +206,9 @@ export interface RootRouteChildren {
   ResetPasswordRoute: typeof ResetPasswordRoute
   SetupRoute: typeof SetupRoute
   TeamRoute: typeof TeamRoute
+  AttendanceApprovalsRoute: typeof AttendanceApprovalsRoute
+  AttendanceRegisterRoute: typeof AttendanceRegisterRoute
+  AttendanceSettingsRoute: typeof AttendanceSettingsRoute
   InviteTokenRoute: typeof InviteTokenRoute
 }
 
@@ -167,6 +219,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/attendance': {
+      id: '/attendance'
+      path: '/attendance'
+      fullPath: '/attendance'
+      preLoaderRoute: typeof AttendanceRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/change-password': {
@@ -225,6 +284,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof TeamRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/attendance_/approvals': {
+      id: '/attendance_/approvals'
+      path: '/attendance/approvals'
+      fullPath: '/attendance/approvals'
+      preLoaderRoute: typeof AttendanceApprovalsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/attendance_/register': {
+      id: '/attendance_/register'
+      path: '/attendance/register'
+      fullPath: '/attendance/register'
+      preLoaderRoute: typeof AttendanceRegisterRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/attendance_/settings': {
+      id: '/attendance_/settings'
+      path: '/attendance/settings'
+      fullPath: '/attendance/settings'
+      preLoaderRoute: typeof AttendanceSettingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/invite/$token': {
       id: '/invite/$token'
       path: '/invite/$token'
@@ -237,6 +317,7 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AttendanceRoute: AttendanceRoute,
   ChangePasswordRoute: ChangePasswordRoute,
   CompaniesRoute: CompaniesRoute,
   HomeRoute: HomeRoute,
@@ -245,6 +326,9 @@ const rootRouteChildren: RootRouteChildren = {
   ResetPasswordRoute: ResetPasswordRoute,
   SetupRoute: SetupRoute,
   TeamRoute: TeamRoute,
+  AttendanceApprovalsRoute: AttendanceApprovalsRoute,
+  AttendanceRegisterRoute: AttendanceRegisterRoute,
+  AttendanceSettingsRoute: AttendanceSettingsRoute,
   InviteTokenRoute: InviteTokenRoute,
 }
 export const routeTree = rootRouteImport
