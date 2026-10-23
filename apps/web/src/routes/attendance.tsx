@@ -47,6 +47,9 @@ function Attendance() {
   return (
     <AppShell title="Self Attendance">
       <AttendanceBody />
+      <Link to="/attendance/log" className={`${secondaryButton} mt-4 grid place-items-center`}>
+        Attendance log
+      </Link>
     </AppShell>
   );
 }

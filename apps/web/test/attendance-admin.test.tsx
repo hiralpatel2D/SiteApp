@@ -385,6 +385,43 @@ describe('Attendance admin and Home tile', () => {
     expect(!!within(row).queryByText(/Another approver has to decide/)).toBe(!canDecide);
   });
 
+  it('attendance log shows my days, newest first, and the Everyone tab for reviewers', async () => {
+    const entry = (id: string, day: string, kind: string, status: string, name = 'Hiral') => ({
+      id,
+      name,
+      own: name === 'Hiral',
+      workDate: day,
+      kind,
+      at: AT,
+      status,
+      lateMin: kind === 'check_in' ? 12 : 0,
+      distanceM: 4.2,
+      reasons: [],
+    });
+    const calls = setup(['projects.view', 'attendance.view', 'attendance.review'], {
+      'GET /api/attendance/log': () =>
+        json(200, {
+          from: '2026-10-01',
+          to: '2026-10-31',
+          scope: 'me',
+          entries: [
+            entry('a', '2026-10-15', 'check_in', 'recorded'),
+            entry('b', '2026-10-16', 'check_in', 'approved'),
+            entry('c', '2026-10-16', 'check_out', 'recorded'),
+          ],
+        }),
+    });
+    renderAt('/attendance/log');
+    const days = await screen.findByRole('list', { name: 'Attendance by day' });
+    const items = within(days).getAllByText(/\d{4}$/);
+    expect(items[0]!.textContent).toMatch(/16 Oct 2026/);
+    expect(items[1]!.textContent).toMatch(/15 Oct 2026/);
+    expect(within(days).getAllByText(/Late by 12 min/)).toHaveLength(2);
+    expect(within(days).getByText(/Approved/)).toBeTruthy();
+    await userEvent.click(screen.getByRole('tab', { name: 'Everyone' }));
+    await waitFor(() => expect(calls['GET /api/attendance/log']!.length).toBeGreaterThan(1));
+  });
+
   it('approvals show reasons for a pending check-in', async () => {
     let loads = 0;
     const calls = setup(['attendance.review'], {
