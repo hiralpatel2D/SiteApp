@@ -34,6 +34,67 @@ function Summary() {
   );
 }
 
+const weekday = (d: string) =>
+  new Date(`${d}T00:00:00Z`).toLocaleDateString('en-GB', { weekday: 'short', timeZone: 'UTC' });
+
+/** One table for the whole month: a header of dates, one row per person, scrolling sideways. */
+function DayTable({ data }: { data: MonthlySummary }) {
+  const today = workDate(new Date());
+  return (
+    <div className="flex flex-col gap-2">
+      <h2 className="font-display text-[20px] font-extrabold uppercase leading-tight">
+        Day by day
+      </h2>
+      <div className="overflow-x-auto rounded-[var(--r)] border border-line-soft bg-card">
+        <table aria-label="Day by day" className="border-separate border-spacing-0 text-xs">
+          <thead>
+            <tr>
+              <th
+                scope="col"
+                className="sticky left-0 z-10 min-w-28 border-b border-r border-line-soft bg-card px-2 py-1.5 text-left font-medium"
+              >
+                Name
+              </th>
+              {data.days.map((d) => (
+                <th
+                  key={d}
+                  scope="col"
+                  title={d}
+                  className={`min-w-8 border-b border-line-soft px-1 py-1.5 text-center font-medium ${d === today ? 'bg-surface' : ''}`}
+                >
+                  <span className="block">{d.slice(8)}</span>
+                  <span className="block font-normal text-muted">{weekday(d).slice(0, 2)}</span>
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {data.people.map((p) => (
+              <tr key={p.membershipId}>
+                <th
+                  scope="row"
+                  className="sticky left-0 z-10 max-w-36 truncate border-r border-line-soft bg-card px-2 py-1.5 text-left font-medium"
+                >
+                  {p.name}
+                </th>
+                {p.cells.map((c) => (
+                  <td
+                    key={c.date}
+                    title={`${c.date} · ${c.status}`}
+                    className={`h-8 text-center ${TONE[c.status]}`}
+                  >
+                    {CODE[c.status]}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 function SummaryBody() {
   const { ctx } = useShell();
   const canExport = useCan('attendance.export');
@@ -131,24 +192,10 @@ function SummaryBody() {
                   <p className="font-medium">
                     {`Present ${p.present} · Late ${p.late} · Pending ${p.pending} · Absent ${p.absent} · ${p.hours} h`}
                   </p>
-                  <div
-                    role="img"
-                    aria-label={`${p.name}, day by day`}
-                    className="flex gap-0.5 overflow-x-auto pb-1"
-                  >
-                    {p.cells.map((c) => (
-                      <span
-                        key={c.date}
-                        title={c.date}
-                        className={`grid h-7 min-w-6 place-items-center rounded text-xs ${TONE[c.status]}`}
-                      >
-                        {CODE[c.status] || c.date.slice(8)}
-                      </span>
-                    ))}
-                  </div>
                 </li>
               ))}
             </ul>
+            <DayTable data={data} />
           </>
         ))}
     </div>

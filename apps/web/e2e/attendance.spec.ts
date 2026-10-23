@@ -287,7 +287,9 @@ test('attendance: set up the site, register and approve faces, check in inside a
   await expect(people.getByRole('listitem').filter({ hasText: FAR_ENGINEER.name })).toContainText(
     'Present 1',
   );
-  await expect(people.getByRole('img', { name: `${ENGINEER.name}, day by day` })).toBeVisible();
+  const dayTable = a.getByRole('table', { name: 'Day by day' });
+  await expect(dayTable.getByRole('rowheader', { name: ENGINEER.name })).toBeVisible();
+  await expect(dayTable.getByRole('columnheader').nth(1)).toContainText('01');
   await noHorizontalScroll(a);
   const [download] = await Promise.all([
     a.waitForEvent('download'),
