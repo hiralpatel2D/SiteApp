@@ -14,7 +14,7 @@ import {
   type TodayEntry,
 } from '../lib/attendance';
 import { getActiveProject, type Project } from '../lib/project';
-import { AppShell, useShell } from '../components/AppShell';
+import { AppShell, useCan, useShell } from '../components/AppShell';
 import { Icon } from '../components/icons';
 import { Alert, Loading, primaryButton, secondaryButton } from '../components/ui';
 import { CameraCheck } from '../attendance/CameraCheck';
@@ -37,6 +37,9 @@ const RELOAD_ON = new Set([
 ]);
 const NOT_SET_UP =
   'Attendance is not set up for this project yet. Ask your admin to set the site location.';
+
+const NOT_SET_UP_ADMIN =
+  'Attendance is not set up for this project yet. Set the site location and radius to start.';
 
 const card = 'flex flex-col gap-3 rounded-[var(--r)] border border-line-soft bg-card p-4';
 
@@ -66,6 +69,20 @@ type Step =
   | { kind: 'sending' }
   | { kind: 'done'; result: CheckResult }
   | { kind: 'failed'; message: string };
+
+/** Admins get the way forward; everyone else is told who to ask. */
+function NotSetUp() {
+  const canSet = useCan('attendance.settings');
+  if (!canSet) return <Card>{NOT_SET_UP}</Card>;
+  return (
+    <div className={card}>
+      <p className="font-medium">{NOT_SET_UP_ADMIN}</p>
+      <Link to="/attendance/settings" className={`${primaryButton} grid place-items-center`}>
+        Set site location
+      </Link>
+    </div>
+  );
+}
 
 function AttendanceBody() {
   const { project, error: projectError } = useProject();
@@ -190,7 +207,7 @@ function AttendanceBody() {
   let body: ReactNode;
   if (loadError) body = <Alert>{loadError}</Alert>;
   else if (!today) body = <Loading />;
-  else if (!today.setUp) body = <Card>{NOT_SET_UP}</Card>;
+  else if (!today.setUp) body = <NotSetUp />;
   else if (today.face !== 'approved') body = <FaceCard face={today.face} />;
   else if (step.kind === 'done')
     body = <Confirmation result={step.result} tz={tz} onDone={() => setStep({ kind: 'idle' })} />;

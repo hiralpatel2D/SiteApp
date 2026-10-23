@@ -75,6 +75,7 @@ function setup(
     today?: Today;
     check?: () => Response;
     match?: (init?: RequestInit) => Promise<Response>;
+    capabilities?: string[];
   } = {},
 ) {
   const posted: Record<string, unknown> = {};
@@ -86,7 +87,7 @@ function setup(
         json(200, {
           company: { id: COMPANY_ID, name: 'V and P', slug: 'vp' },
           role: { id: 'r1', name: 'Site Engineer', key: null },
-          capabilities: ['projects.view', 'attendance.view'],
+          capabilities: opts.capabilities ?? ['projects.view', 'attendance.view'],
         }),
       );
     if (url.includes('/api/projects'))
@@ -406,6 +407,23 @@ describe('Attendance page', () => {
     renderAt('/attendance');
     expect(await screen.findByText(/Attendance is not set up for this project yet/)).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Check in' })).toBeNull();
+  });
+
+  it('offers admins a way to set the site location', async () => {
+    setup({
+      today: today({ setUp: false }),
+      capabilities: ['projects.view', 'attendance.view', 'attendance.settings'],
+    });
+    renderAt('/attendance');
+    const link = await screen.findByRole('link', { name: 'Set site location' });
+    expect(link.getAttribute('href')).toBe('/attendance/settings');
+  });
+
+  it('does not show the set-location link to non-admins', async () => {
+    setup({ today: today({ setUp: false }) });
+    renderAt('/attendance');
+    await screen.findByText(/Attendance is not set up for this project yet/);
+    expect(screen.queryByRole('link', { name: 'Set site location' })).toBeNull();
   });
 
   it('asks to register the face when none is approved', async () => {
