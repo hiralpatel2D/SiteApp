@@ -15,10 +15,14 @@ import type { AppTx } from '../db/tenant';
 import { AppError } from '../http/errors';
 import { requireCap, runInTenant, type Tenant, type TenantEnv } from '../tenant/context';
 import { buildWorkbook } from './export';
+import { ipBackstop, memberLimit } from './limits';
 import { canSeeProject } from './reach';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MONTH_RE = /^(\d{4})-(0[1-9]|1[0-2])$/;
+/** A month's summary or file is a heavy read: each member gets a few a minute. */
+const SUMMARY_LIMIT = { max: 30, windowMs: 60_000 };
+const EXPORT_LIMIT = { max: 6, windowMs: 60_000 };
 const notFound = () => new AppError(404, 'not_found', 'Not found.');
 const badMonth = () => new AppError(400, 'bad_month', 'Choose a month like 2026-10.');
 
@@ -204,53 +208,66 @@ function params(c: { req: { query: (k: string) => string | undefined } }) {
 export function summaryRoutes(): Hono<AppEnv> {
   const r = new Hono<TenantEnv>();
 
-  r.get('/summary', requireCap('attendance.review'), async (c) => {
-    const t = c.get('tenant');
-    const { projectId, month } = params(c);
-    const data = await runInTenant(c, (tx) => loadMonth(tx, t, projectId, month));
-    const summary = buildSummary({
-      month,
-      today: workDate(new Date(), data.tz),
-      members: data.members,
-      entries: data.entries,
-    });
-    return c.json({ projectName: data.projectName, timezone: data.tz, ...summary });
-  });
-
-  r.get('/export', requireCap('attendance.export'), async (c) => {
-    const t = c.get('tenant');
-    const { projectId, month } = params(c);
-    const data = await runInTenant(c, async (tx) => {
-      const loaded = await loadMonth(tx, t, projectId, month);
-      await writeAudit(tx, t, {
-        action: 'attendance.exported',
-        entity: 'project',
-        entityId: projectId,
-        before: null,
-        after: { month, people: loaded.members.length },
+  r.get(
+    '/summary',
+    ipBackstop(),
+    memberLimit(SUMMARY_LIMIT),
+    requireCap('attendance.review'),
+    async (c) => {
+      const t = c.get('tenant');
+      const { projectId, month } = params(c);
+      const data = await runInTenant(c, (tx) => loadMonth(tx, t, projectId, month));
+      const summary = buildSummary({
+        month,
+        today: workDate(new Date(), data.tz),
+        members: data.members,
+        entries: data.entries,
       });
-      return loaded;
-    });
-    const summary = buildSummary({
-      month,
-      today: workDate(new Date(), data.tz),
-      members: data.members,
-      entries: data.entries,
-    });
-    const body = await buildWorkbook({
-      projectName: data.projectName,
-      timezone: data.tz,
-      summary,
-      entries: data.entries,
-      members: data.members,
-    });
-    const safe = data.projectName.replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'project';
-    return c.body(body, 200, {
-      'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      'content-disposition': `attachment; filename="attendance-${safe}-${month}.xlsx"`,
-      'cache-control': 'no-store',
-    });
-  });
+      return c.json({ projectName: data.projectName, timezone: data.tz, ...summary });
+    },
+  );
+
+  r.get(
+    '/export',
+    ipBackstop(),
+    memberLimit(EXPORT_LIMIT),
+    requireCap('attendance.export'),
+    async (c) => {
+      const t = c.get('tenant');
+      const { projectId, month } = params(c);
+      const data = await runInTenant(c, async (tx) => {
+        const loaded = await loadMonth(tx, t, projectId, month);
+        await writeAudit(tx, t, {
+          action: 'attendance.exported',
+          entity: 'project',
+          entityId: projectId,
+          before: null,
+          after: { month, people: loaded.members.length },
+        });
+        return loaded;
+      });
+      const summary = buildSummary({
+        month,
+        today: workDate(new Date(), data.tz),
+        members: data.members,
+        entries: data.entries,
+      });
+      const body = await buildWorkbook({
+        projectName: data.projectName,
+        timezone: data.tz,
+        summary,
+        entries: data.entries,
+        members: data.members,
+      });
+      const safe =
+        data.projectName.replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'project';
+      return c.body(body, 200, {
+        'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'content-disposition': `attachment; filename="attendance-${safe}-${month}.xlsx"`,
+        'cache-control': 'no-store',
+      });
+    },
+  );
 
   return r as unknown as Hono<AppEnv>;
 }

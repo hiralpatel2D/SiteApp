@@ -1,4 +1,3 @@
-import ExcelJS from 'exceljs';
 import type { MonthlySummary, SummaryEntry, SummaryMember } from './summary';
 
 /**
@@ -27,6 +26,8 @@ export async function buildWorkbook(input: {
   entries: SummaryEntry[];
   members: SummaryMember[];
 }): Promise<Uint8Array<ArrayBuffer>> {
+  // Loaded on first use: the library costs ~30 MB of memory the API does not need until an export.
+  const { default: ExcelJS } = await import('exceljs');
   const { summary, timezone: tz } = input;
   const wb = new ExcelJS.Workbook();
   wb.creator = 'Site Diary';

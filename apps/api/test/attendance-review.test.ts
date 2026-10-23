@@ -503,6 +503,37 @@ describe('attendance pending review', () => {
       expect(audit!.entityId).toBe(ctx.p1);
     });
 
+    it('a deactivated person with entries still shows; one without does not', async () => {
+      const ctx = await setup();
+      await pendingEntry(ctx);
+      await ownerDb
+        .update(memberships)
+        .set({ status: 'deactivated' })
+        .where(eq(memberships.id, ctx.worker.membershipId));
+      const body = (await (
+        await asCoord(ctx, `/summary?projectId=${ctx.p1}&month=2026-10`)
+      ).json()) as Sum;
+      expect(body.people.map((p) => p.name)).toContain('w');
+      const other = (await (
+        await asCoord(ctx, `/summary?projectId=${ctx.p1}&month=2026-09`)
+      ).json()) as Sum;
+      expect(other.people.map((p) => p.name)).not.toContain('w');
+    });
+
+    it('limits exports per member (a heavy request) with 429', async () => {
+      const ctx = await setup();
+      const admin = await seedMember(ctx.co.companyId, 'admin', 'admin2@alpha.test', {
+        app: ctx.app,
+      });
+      const go = () =>
+        req(ctx.app, `/api/attendance/export?projectId=${ctx.p1}&month=2026-10`, {
+          cookie: admin.cookie,
+          company: ctx.co.companyId,
+        });
+      for (let i = 0; i < 6; i++) expect((await go()).status).toBe(200);
+      expect((await go()).status).toBe(429);
+    });
+
     it('export is forbidden without attendance.export (a coordinator has review only)', async () => {
       const ctx = await setup();
       const res = await asCoord(ctx, `/export?projectId=${ctx.p1}&month=2026-10`);
