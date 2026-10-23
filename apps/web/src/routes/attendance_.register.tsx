@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import { Link, createFileRoute } from '@tanstack/react-router';
 import { ApiError, errorMessage } from '../lib/api';
 import { getMyFace, registerFace, type FaceStatus } from '../lib/attendance';
-import { AppShell } from '../components/AppShell';
+import { AppShell, useCan } from '../components/AppShell';
 import { Alert, Loading, primaryButton, secondaryButton } from '../components/ui';
 import { FaceCapture } from '../attendance/FaceCapture';
 
@@ -11,7 +11,7 @@ export const Route = createFileRoute('/attendance_/register')({ component: Regis
 
 const CONSENT =
   "Site Diary keeps a numeric face code to confirm it's you at check-in. One photo is kept until a senior approves or rejects your registration, then deleted. To remove your face code, ask your company admin to request deletion from Site Diary support. If a check-in needs review, its photos are kept for the reviewer.";
-const SENT = 'Sent for approval. Ask your senior to approve it now.';
+const SENT = 'Registered. Your photo is waiting for approval.';
 
 const card = 'flex flex-col gap-3 rounded-[var(--r)] border border-line-soft bg-card p-4';
 
@@ -80,7 +80,11 @@ function RegisterBody() {
       <div className="flex flex-col gap-4">
         <div className="flex flex-col items-center gap-3 rounded-[var(--r)] border border-line bg-card p-6 text-center">
           <p className="font-display text-[28px] font-extrabold uppercase leading-tight">{SENT}</p>
+          <p className="text-muted">
+            Open Approvals to see your photo. A senior approves it, then you can check in.
+          </p>
         </div>
+        <ApprovalsLink />
         <BackToAttendance />
       </div>
     );
@@ -99,6 +103,7 @@ function RegisterBody() {
       <Card>
         <Alert>{notice}</Alert>
         <p className="font-medium">Your face registration is waiting for approval by a senior.</p>
+        <ApprovalsLink />
         <BackToAttendance />
       </Card>
     );
@@ -150,6 +155,16 @@ function RegisterBody() {
 
 function Card({ children }: { children: ReactNode }) {
   return <div className={card}>{children}</div>;
+}
+
+/** Approvers can open the Approvals list straight from here; others have nothing to open. */
+function ApprovalsLink() {
+  if (!useCan('attendance.approve_face')) return null;
+  return (
+    <Link to="/attendance/approvals" className={`${primaryButton} grid place-items-center`}>
+      Open Approvals
+    </Link>
+  );
 }
 
 function BackToAttendance() {

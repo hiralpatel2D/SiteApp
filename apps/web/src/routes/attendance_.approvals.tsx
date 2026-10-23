@@ -162,30 +162,44 @@ function Faces() {
                   className="size-24 shrink-0 rounded-[calc(var(--r)*0.75)] border border-line-soft object-cover"
                 />
                 <div className="flex min-w-0 flex-col">
+                  {f.own && (
+                    <span className="font-mono text-[12px] uppercase tracking-widest text-muted">
+                      Your registration
+                    </span>
+                  )}
                   <span className="break-words font-display text-[22px] font-extrabold uppercase leading-tight">
                     {f.name}
                   </span>
                   <span className="break-all text-sm text-muted">{f.email}</span>
                 </div>
               </div>
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  className={approveButton}
-                  disabled={busy !== null}
-                  onClick={() => void decide(f.id, () => approveFace(f.id), `Approved ${f.name}.`)}
-                >
-                  Approve
-                </button>
-                <button
-                  type="button"
-                  className={rejectButton}
-                  disabled={busy !== null}
-                  onClick={() => void decide(f.id, () => rejectFace(f.id), `Rejected ${f.name}.`)}
-                >
-                  Reject
-                </button>
-              </div>
+              {!f.canDecide && (
+                <p className="text-muted">
+                  Another approver has to approve your registration. Ask a senior to open Approvals.
+                </p>
+              )}
+              {f.canDecide && (
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    className={approveButton}
+                    disabled={busy !== null}
+                    onClick={() =>
+                      void decide(f.id, () => approveFace(f.id), `Approved ${f.name}.`)
+                    }
+                  >
+                    Approve
+                  </button>
+                  <button
+                    type="button"
+                    className={rejectButton}
+                    disabled={busy !== null}
+                    onClick={() => void decide(f.id, () => rejectFace(f.id), `Rejected ${f.name}.`)}
+                  >
+                    Reject
+                  </button>
+                </div>
+              )}
             </li>
           ))}
         </ul>

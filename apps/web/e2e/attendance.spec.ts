@@ -83,16 +83,14 @@ async function assignToProject(emails: string[], projectName: string): Promise<v
   });
 }
 
-/** Consent, then the guided capture; ends on "Sent for approval". */
+/** Consent, then the guided capture; ends on "Registered. Your photo is waiting for approval." */
 async function registerFace(page: Page, phone = false): Promise<void> {
   await page.goto('/attendance');
   await page.getByRole('link', { name: 'Register your face' }).click();
   await expect(page).toHaveURL(/\/attendance\/register$/);
   if (phone) await noHorizontalScroll(page);
   await page.getByRole('button', { name: 'I agree' }).click();
-  await expect(page.getByText('Sent for approval. Ask your senior to approve it now.')).toBeVisible(
-    SLOW,
-  );
+  await expect(page.getByText('Registered. Your photo is waiting for approval.')).toBeVisible(SLOW);
   if (phone) await noHorizontalScroll(page);
 }
 

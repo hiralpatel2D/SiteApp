@@ -73,6 +73,10 @@ export type MatchResult = { matched: boolean };
 export type PendingFace = {
   id: string;
   membershipId: string;
+  /** True for the signed-in person's own registration. */
+  own: boolean;
+  /** False when someone else must decide it (your own, while another approver exists). */
+  canDecide: boolean;
   name: string;
   email: string;
   createdAt: string;

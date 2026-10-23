@@ -257,7 +257,7 @@ describe('face registration', () => {
     expect(audits).toHaveLength(1);
   });
 
-  it('refuses self approval with 403 and hides self from the list', async () => {
+  it('lists your own registration but refuses to decide it while another approver exists', async () => {
     const ctx = await setup();
     await register(ctx, ctx.pm.cookie);
     const [row] = await rows();
@@ -265,9 +265,34 @@ describe('face registration', () => {
     expect(res.status).toBe(403);
     expect((await errorOf(res)).code).toBe('forbidden');
     const list = (await (await call(ctx, ctx.pm.cookie, '/pending')).json()) as {
-      pending: unknown[];
+      pending: { id: string; own: boolean; canDecide: boolean; photo: string }[];
     };
-    expect(list.pending).toHaveLength(0);
+    expect(list.pending).toHaveLength(1);
+    expect(list.pending[0]).toMatchObject({ id: row!.id, own: true, canDecide: false });
+    expect(list.pending[0]!.photo.startsWith('data:image/jpeg;base64,')).toBe(true);
+  });
+
+  it('lets the only approver decide their own registration, and audits it', async () => {
+    const ctx = await setup();
+    // The other PM is the only other approver: deactivate them.
+    await ownerDb
+      .update(memberships)
+      .set({ status: 'deactivated' })
+      .where(eq(memberships.id, ctx.pmOther.membershipId));
+    await register(ctx, ctx.pm.cookie);
+    const [row] = await rows();
+    const list = (await (await call(ctx, ctx.pm.cookie, '/pending')).json()) as {
+      pending: { own: boolean; canDecide: boolean }[];
+    };
+    expect(list.pending[0]).toMatchObject({ own: true, canDecide: true });
+    const res = await call(ctx, ctx.pm.cookie, `/${row!.id}/approve`, 'POST', {});
+    expect(res.status).toBe(200);
+    expect(await statusOf(ctx, ctx.pm.cookie)).toBe('approved');
+    const [audit] = await ownerDb
+      .select()
+      .from(auditLog)
+      .where(eq(auditLog.action, 'face.approved'));
+    expect(JSON.stringify(audit)).toContain('"selfApproved":true');
   });
 
   it('a PM without a shared project gets 404 and an empty list', async () => {
