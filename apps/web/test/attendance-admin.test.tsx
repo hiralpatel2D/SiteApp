@@ -302,6 +302,8 @@ describe('Attendance admin and Home tile', () => {
             {
               id: 'f1',
               membershipId: 'm1',
+              own: false,
+              canDecide: true,
               name: 'Ravi Kumar',
               email: 'ravi@x.test',
               createdAt: AT,
@@ -310,6 +312,8 @@ describe('Attendance admin and Home tile', () => {
             {
               id: 'f2',
               membershipId: 'm2',
+              own: false,
+              canDecide: true,
               name: 'Sita Rao',
               email: 'sita@x.test',
               createdAt: AT,
@@ -329,6 +333,35 @@ describe('Attendance admin and Home tile', () => {
     await waitFor(() => expect(screen.queryByText('Ravi Kumar')).toBeNull());
     expect(screen.getByText('Sita Rao')).toBeTruthy();
     expect(calls['POST /api/attendance/face/f1/approve']).toHaveLength(1);
+  });
+
+  it.each([
+    ['cannot be decided yet', false],
+    ['can be decided by the only approver', true],
+  ])('approvals list your own registration that %s', async (_, canDecide) => {
+    setup(['attendance.approve_face'], {
+      'GET /api/attendance/face/pending': () =>
+        json(200, {
+          pending: [
+            {
+              id: 'me1',
+              membershipId: 'mm',
+              own: true,
+              canDecide,
+              name: 'Hiral Owner',
+              email: 'owner@x.test',
+              createdAt: AT,
+              photo: 'data:image/jpeg;base64,CCCC',
+            },
+          ],
+        }),
+    });
+    renderAt('/attendance/approvals');
+    const row = (await screen.findByText('Hiral Owner')).closest('li')!;
+    expect(within(row).getByText('Your registration')).toBeTruthy();
+    expect(within(row).getByRole('img', { name: 'Hiral Owner' })).toBeTruthy();
+    expect(!!within(row).queryByRole('button', { name: 'Approve' })).toBe(canDecide);
+    expect(!!within(row).queryByText(/Another approver has to approve/)).toBe(!canDecide);
   });
 
   it('approvals show reasons for a pending check-in', async () => {
@@ -450,7 +483,7 @@ describe('Register face', () => {
     ).toBeTruthy();
     await userEvent.click(screen.getByRole('button', { name: 'I agree' }));
     expect(
-      await screen.findByText('Sent for approval. Ask your senior to approve it now.', undefined, {
+      await screen.findByText('Registered. Your photo is waiting for approval.', undefined, {
         timeout: 4000,
       }),
     ).toBeTruthy();

@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, eq, ne } from 'drizzle-orm';
 import {
   faceRegistrationBodySchema,
   MIN_FACE_WIDTH_PX,
@@ -10,7 +10,7 @@ import {
 import { writeAudit } from '../audit/audit';
 import type { AppEnv } from '../auth/session';
 import type { Config } from '../config';
-import { faceRegistrations, memberships, users } from '../db/schema';
+import { faceRegistrations, memberships, roleCapabilities, users } from '../db/schema';
 import type { AppTx } from '../db/tenant';
 import { parseBody } from '../http/body';
 import { isUniqueViolation } from '../db/errors';
@@ -56,6 +56,33 @@ const isClear = (r: FaceReading, minLiveness: number) =>
   r.real >= minLiveness &&
   r.live >= minLiveness &&
   r.embedding !== null;
+
+/**
+ * True when another active member of the company holds `attendance.approve_face`. A person may
+ * decide their own registration only when this is false (the first owner, before anyone else can).
+ */
+async function hasOtherApprover(tx: AppTx, t: Tenant): Promise<boolean> {
+  const [other] = await tx
+    .select({ id: memberships.id })
+    .from(memberships)
+    .innerJoin(
+      roleCapabilities,
+      and(
+        eq(roleCapabilities.companyId, memberships.companyId),
+        eq(roleCapabilities.roleId, memberships.roleId),
+      ),
+    )
+    .where(
+      and(
+        eq(memberships.companyId, t.companyId),
+        eq(memberships.status, 'active'),
+        ne(memberships.id, t.membershipId),
+        eq(roleCapabilities.capability, 'attendance.approve_face'),
+      ),
+    )
+    .limit(1);
+  return !!other;
+}
 
 export type FaceStatus = 'none' | 'pending' | 'approved' | 'rejected';
 
@@ -237,13 +264,18 @@ export function registrationRoutes({ config, faceEngine }: RegistrationDeps): Ho
           ),
         )
         .orderBy(asc(faceRegistrations.createdAt));
+      // Your own registration is listed so you can see your photo; you may decide it only when
+      // nobody else can (see hasOtherApprover).
+      const soleApprover = !(await hasOtherApprover(tx, t));
       const out = [];
       for (const row of list) {
-        if (row.membershipId === t.membershipId) continue;
-        if (!(await sharesProject(tx, t, row.membershipId))) continue;
+        const own = row.membershipId === t.membershipId;
+        if (!own && !(await sharesProject(tx, t, row.membershipId))) continue;
         out.push({
           id: row.id,
           membershipId: row.membershipId,
+          own,
+          canDecide: !own || soleApprover,
           name: row.name,
           email: row.email,
           createdAt: row.createdAt,
@@ -255,7 +287,7 @@ export function registrationRoutes({ config, faceEngine }: RegistrationDeps): Ho
     return c.json({ pending });
   });
 
-  /** Loads the pending row the approver may decide: 404 if missing or out of reach, 403 for their own. */
+  /** Loads the pending row the approver may decide: 404 if missing or out of reach, 403 for their own unless they are the only approver. */
   async function loadDecidable(tx: AppTx, t: Tenant, rawId: string) {
     const id = rawId.toLowerCase();
     if (!UUID_RE.test(id)) throw notFound();
@@ -271,20 +303,21 @@ export function registrationRoutes({ config, faceEngine }: RegistrationDeps): Ho
       )
       .for('update');
     if (!row) throw notFound();
-    if (row.membershipId === t.membershipId) throw forbidden();
+    const own = row.membershipId === t.membershipId;
+    if (own && (await hasOtherApprover(tx, t))) throw forbidden();
     const [m] = await tx
       .select({ status: memberships.status })
       .from(memberships)
       .where(and(eq(memberships.companyId, t.companyId), eq(memberships.id, row.membershipId)));
     if (m?.status !== 'active') throw notFound();
-    if (!(await sharesProject(tx, t, row.membershipId))) throw notFound();
-    return row;
+    if (!own && !(await sharesProject(tx, t, row.membershipId))) throw notFound();
+    return { row, own };
   }
 
   r.post('/:id/approve', requireCap('attendance.approve_face'), async (c) => {
     const t = c.get('tenant');
     await runInTenant(c, async (tx) => {
-      const row = await loadDecidable(tx, t, c.req.param('id'));
+      const { row, own } = await loadDecidable(tx, t, c.req.param('id'));
       // Supersede the current approved row first so the one-approved index holds.
       await tx
         .update(faceRegistrations)
@@ -311,7 +344,7 @@ export function registrationRoutes({ config, faceEngine }: RegistrationDeps): Ho
         entity: 'face_registration',
         entityId: row.id,
         before: { status: 'pending' },
-        after: { status: 'approved', membershipId: row.membershipId },
+        after: { status: 'approved', membershipId: row.membershipId, selfApproved: own },
       });
     });
     return c.json({ status: 'approved' });
@@ -320,7 +353,7 @@ export function registrationRoutes({ config, faceEngine }: RegistrationDeps): Ho
   r.post('/:id/reject', requireCap('attendance.approve_face'), async (c) => {
     const t = c.get('tenant');
     await runInTenant(c, async (tx) => {
-      const row = await loadDecidable(tx, t, c.req.param('id'));
+      const { row } = await loadDecidable(tx, t, c.req.param('id'));
       await tx
         .update(faceRegistrations)
         .set({
