@@ -126,8 +126,9 @@ describe('face registration', () => {
     expect(res.status).toBe(400);
   });
 
-  it('rejects a frame with two faces as face_not_clear', async () => {
-    const ctx = await setup({ 3: { faces: 2, embedding: null } });
+  it('rejects when fewer than 3 photos are clear as face_not_clear', async () => {
+    const two = { faces: 2, embedding: null };
+    const ctx = await setup({ 1: two, 2: two, 3: two });
     const res = await register(ctx, ctx.worker.cookie);
     expect(res.status).toBe(422);
     const e = await errorOf(res);
@@ -136,15 +137,24 @@ describe('face registration', () => {
     expect(await rows()).toHaveLength(0);
   });
 
-  it.each([[{ minFaceWidth: 100 }], [{ real: 0.3 }], [{ live: 0.3 }]])(
-    'rejects a weak frame %o as face_not_clear',
-    async (bad) => {
-      const ctx = await setup({ 2: bad });
-      const res = await register(ctx, ctx.worker.cookie);
-      expect(res.status).toBe(422);
-      expect((await errorOf(res)).code).toBe('face_not_clear');
-    },
-  );
+  it.each([
+    [{ faces: 2, embedding: null }],
+    [{ minFaceWidth: 100 }],
+    [{ real: 0.3 }],
+    [{ live: 0.3 }],
+  ])('drops one weak photo %o and still registers', async (bad) => {
+    const ctx = await setup({ 2: bad });
+    expect((await register(ctx, ctx.worker.cookie)).status).toBe(200);
+    expect(await rows()).toHaveLength(1);
+  });
+
+  it('shows the approver another clear photo when the usual one is weak', async () => {
+    // Reading keys are 1-based frame numbers: frame 4 is index REGISTRATION_PHOTO_FRAME.
+    const ctx = await setup({ [REGISTRATION_PHOTO_FRAME + 1]: { real: 0.3 } });
+    expect((await register(ctx, ctx.worker.cookie)).status).toBe(200);
+    const [row] = await rows();
+    expect(row!.photo!.toString('base64')).toBe(frames()[0]);
+  });
 
   it('rejects frames that disagree as face_not_consistent', async () => {
     const ctx = await setup({ 4: { embedding: Array.from({ length: 1024 }, () => -1) } });
@@ -153,25 +163,26 @@ describe('face registration', () => {
     expect((await errorOf(res)).code).toBe('face_not_consistent');
   });
 
-  it.each([
-    ['byte-identical photos', {}, [1, 2, 3, 2, 5]],
-    [
-      'near-identical photos',
-      {
-        2: { thumb: new Uint8Array(1024).fill(50) },
-        4: { thumb: Uint8Array.from({ length: 1024 }, (_, i) => 50 + (i % 2)) },
-      },
-      [1, 2, 3, 4, 5],
-    ],
-  ] as const)('rejects %s as frames_identical', async (_, readings, nums) => {
-    const ctx = await setup(readings as Record<number, Partial<FaceReading>>);
-    const res = await register(ctx, ctx.worker.cookie, nums.map(frame));
-    expect(res.status).toBe(422);
-    expect(await errorOf(res)).toEqual({
-      code: 'frames_identical',
-      message: 'Move slightly and try again — the photos looked identical.',
+  it.each([['byte-identical photos', {}, [1, 2, 3, 2, 5]]] as const)(
+    'rejects %s as frames_identical',
+    async (_, readings, nums) => {
+      const ctx = await setup(readings as Record<number, Partial<FaceReading>>);
+      const res = await register(ctx, ctx.worker.cookie, nums.map(frame));
+      expect(res.status).toBe(422);
+      expect(await errorOf(res)).toEqual({
+        code: 'frames_identical',
+        message: 'Move slightly and try again — the photos looked identical.',
+      });
+      expect(await rows()).toHaveLength(0);
+    },
+  );
+
+  it('accepts near-identical photos (a still person)', async () => {
+    const ctx = await setup({
+      2: { thumb: new Uint8Array(1024).fill(50) },
+      4: { thumb: Uint8Array.from({ length: 1024 }, (_, i) => 50 + (i % 2)) },
     });
-    expect(await rows()).toHaveLength(0);
+    expect((await register(ctx, ctx.worker.cookie)).status).toBe(200);
   });
 
   it('accepts different photos whose embeddings are identical', async () => {

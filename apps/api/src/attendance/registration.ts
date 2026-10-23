@@ -18,7 +18,7 @@ import { AppError } from '../http/errors';
 import { forbidden } from '../roles/authz';
 import { requireCap, runInTenant, type Tenant, type TenantEnv } from '../tenant/context';
 import type { FaceEngine, FaceReading } from './face/engine';
-import { framesDistinct, SAME_PERSON_MIN } from './face/frames';
+import { SAME_PERSON_MIN } from './face/frames';
 import { ipBackstop, memberLimit } from './limits';
 import { averageEmbedding, encryptTemplate } from './face/template';
 import { sharesProject } from './reach';
@@ -46,6 +46,9 @@ const identical = () =>
     'frames_identical',
     'Move slightly and try again — the photos looked identical.',
   );
+
+/** Registration needs this many clear photos of the 5; the rest may be blurred or mid-blink. */
+const MIN_CLEAR_PHOTOS = 3;
 
 const isClear = (r: FaceReading, minLiveness: number) =>
   r.faces === 1 &&
@@ -113,17 +116,37 @@ export function registrationRoutes({ config, faceEngine }: RegistrationDeps): Ho
       const jpegs = body.frames.map((f) => Buffer.from(f, 'base64'));
       const readings: FaceReading[] = [];
       for (const jpeg of jpegs) readings.push(await faceEngine.read(jpeg));
-      if (!readings.every((x) => isClear(x, config.faceThresholds.minLiveness))) throw notClear();
-      // A replayed photo (or one photo sent five times) is not a live registration.
-      if (!framesDistinct(jpegs, readings)) throw identical();
-      const embeddings = readings.map((x) => x.embedding!);
+      // Smooth, not strict: a blurred or mid-blink photo is dropped, and the registration
+      // goes on with the clear ones. A senior still approves it in person.
+      const keep = readings.flatMap((x, i) =>
+        isClear(x, config.faceThresholds.minLiveness) ? [i] : [],
+      );
+      if (keep.length < MIN_CLEAR_PHOTOS) {
+        console.warn(
+          `Face registration refused (face_not_clear): ${keep.length}/${readings.length} clear; ` +
+            readings
+              .map((x) => `[faces=${x.faces} w=${x.minFaceWidth} real=${x.real} live=${x.live}]`)
+              .join(' '),
+        );
+        throw notClear();
+      }
+      // One photo sent several times is not a live registration. Near-identical photos are
+      // allowed here (a still person gives them); only exact copies are refused.
+      const clearJpegs = keep.map((i) => jpegs[i]!);
+      if (clearJpegs.some((a, i) => clearJpegs.some((b, j) => j > i && a.equals(b))))
+        throw identical();
+      const embeddings = keep.map((i) => readings[i]!.embedding!);
       for (let i = 0; i < embeddings.length; i++) {
         for (let j = i + 1; j < embeddings.length; j++) {
           if (faceEngine.similarity(embeddings[i]!, embeddings[j]!) < SAME_PERSON_MIN) {
+            console.warn('Face registration refused (face_not_consistent).');
             throw notConsistent();
           }
         }
       }
+      // The approver sees a straight-ahead frame: the usual one, else the next clear one.
+      const photo =
+        jpegs[keep.includes(REGISTRATION_PHOTO_FRAME) ? REGISTRATION_PHOTO_FRAME : keep[0]!]!;
       const template = encryptTemplate(averageEmbedding(embeddings), config.faceTemplateKey);
       try {
         await runInTenant(c, async (tx) => {
@@ -149,7 +172,7 @@ export function registrationRoutes({ config, faceEngine }: RegistrationDeps): Ho
             template,
             modelVersion: faceEngine.modelVersion,
             consentAt: new Date(),
-            photo: jpegs[REGISTRATION_PHOTO_FRAME]!,
+            photo,
             createdBy: t.userId,
             updatedBy: t.userId,
           });
