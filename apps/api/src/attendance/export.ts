@@ -65,7 +65,9 @@ export async function buildWorkbook(input: {
   ];
 
   const grid = wb.addWorksheet('Daily');
-  grid.addRow(['Name', ...summary.days.map((d) => d.slice(8))]).font = bold;
+  const dayName = (d: string) =>
+    new Date(`${d}T00:00:00Z`).toLocaleDateString('en-GB', { weekday: 'short', timeZone: 'UTC' });
+  grid.addRow(['Name', ...summary.days.map((d) => `${d.slice(8)} ${dayName(d)}`)]).font = bold;
   for (const p of summary.people) {
     grid.addRow([
       safeCell(p.name),

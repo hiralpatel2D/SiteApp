@@ -456,9 +456,14 @@ describe('Attendance admin and Home tile', () => {
     URL.createObjectURL = vi.fn(() => 'blob:x');
     URL.revokeObjectURL = vi.fn();
     renderAt('/attendance/summary');
-    const row = (await screen.findByText('Asha Rao')).closest('li')!;
+    const people = await screen.findByRole('list', { name: 'People' });
+    const row = within(people).getByText('Asha Rao').closest('li')!;
     expect(within(row).getByText('Present 1 · Late 1 · Pending 0 · Absent 1 · 8.5 h')).toBeTruthy();
-    expect(within(row).getByRole('img', { name: 'Asha Rao, day by day' })).toBeTruthy();
+    const table = screen.getByRole('table', { name: 'Day by day' });
+    // The dates are the column headers, with the weekday under each.
+    expect(within(table).getByRole('columnheader', { name: /^01\s*Th/ })).toBeTruthy();
+    expect(within(table).getByRole('columnheader', { name: /^02\s*Fr/ })).toBeTruthy();
+    expect(within(table).getByRole('rowheader', { name: 'Asha Rao' })).toBeTruthy();
     await userEvent.click(screen.getByRole('button', { name: 'Download Excel' }));
     await waitFor(() => expect(calls['GET /api/attendance/export']).toHaveLength(1));
     expect(URL.createObjectURL).toHaveBeenCalled();
