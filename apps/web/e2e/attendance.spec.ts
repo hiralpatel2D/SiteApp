@@ -1,4 +1,5 @@
 import { randomInt } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { ORIGIN, OWNER, ensureOwner } from './owner';
 import { withTestDb } from './test-db';
@@ -246,6 +247,68 @@ test('attendance: set up the site, register and approve faces, check in inside a
     await e.goto(path);
     await expect(e.getByRole('main')).not.toContainText('Loading…');
     await noHorizontalScroll(e);
+  }
+
+  // 7. The log, the monthly summary and the Excel file, with who may see what.
+  // The engineer sees only their own log, and no summary or Everyone tab.
+  await e.goto('/attendance');
+  await e.getByRole('link', { name: 'Attendance log' }).click();
+  await expect(e).toHaveURL(/\/attendance\/log$/);
+  const mine = e.getByRole('list', { name: 'Attendance by day' });
+  await expect(mine).toContainText(/In \d\d:\d\d · Recorded/, SLOW);
+  await expect(mine).not.toContainText(FAR_ENGINEER.name);
+  await expect(e.getByRole('tab', { name: 'Everyone' })).toHaveCount(0);
+  await expect(e.getByRole('link', { name: 'Monthly summary' })).toHaveCount(0);
+  await noHorizontalScroll(e);
+  await e.getByRole('button', { name: 'Open menu' }).click();
+  const engineerMenu = e.getByRole('navigation', { name: 'Main menu' });
+  await expect(engineerMenu.getByRole('link', { name: 'Attendance log' })).toBeVisible();
+  await expect(engineerMenu.getByRole('link', { name: 'Monthly summary' })).toHaveCount(0);
+  await expect(engineerMenu.getByRole('link', { name: 'Approvals' })).toHaveCount(0);
+  await e.goto('/attendance/summary');
+  await expect(e.getByText('You do not have access to the monthly summary.')).toBeVisible();
+
+  // The admin sees everyone, the summary and the download.
+  await a.goto('/attendance');
+  await a.getByRole('link', { name: 'Attendance log' }).click();
+  await a.getByRole('tab', { name: 'Everyone' }).click();
+  const everyone = a.getByRole('list', { name: 'Attendance by day' });
+  await expect(everyone).toContainText(ENGINEER.name, SLOW);
+  await expect(everyone).toContainText(FAR_ENGINEER.name);
+  await expect(everyone).toContainText('Approved');
+  await noHorizontalScroll(a);
+  await a.getByRole('link', { name: 'Monthly summary' }).click();
+  await expect(a).toHaveURL(/\/attendance\/summary$/);
+  const people = a.getByRole('list', { name: 'People' });
+  await expect(people).toContainText(ENGINEER.name, SLOW);
+  await expect(people.getByRole('listitem').filter({ hasText: ENGINEER.name })).toContainText(
+    'Present 1',
+  );
+  await expect(people.getByRole('listitem').filter({ hasText: FAR_ENGINEER.name })).toContainText(
+    'Present 1',
+  );
+  await expect(people.getByRole('img', { name: `${ENGINEER.name}, day by day` })).toBeVisible();
+  await noHorizontalScroll(a);
+  const [download] = await Promise.all([
+    a.waitForEvent('download'),
+    a.getByRole('button', { name: 'Download Excel' }).click(),
+  ]);
+  expect(download.suggestedFilename()).toMatch(/^attendance-Harbour-View-\d{4}-\d{2}\.xlsx$/);
+  const bytes = await readFile((await download.path())!);
+  expect(bytes.length).toBeGreaterThan(2000);
+  expect(bytes.subarray(0, 2).toString()).toBe('PK');
+  // An earlier month still lists the assigned people (as absent), not an error.
+  const prior = new Date();
+  prior.setUTCMonth(prior.getUTCMonth() - 1, 1);
+  await a.getByLabel('Month').fill(prior.toISOString().slice(0, 7));
+  await expect(people).toContainText(ENGINEER.name, SLOW);
+  await expect(people.getByRole('listitem').filter({ hasText: ENGINEER.name })).toContainText(
+    'Present 0',
+  );
+  await a.getByRole('button', { name: 'Open menu' }).click();
+  const adminMenu = a.getByRole('navigation', { name: 'Main menu' });
+  for (const name of ['Attendance log', 'Monthly summary', 'Approvals', 'Site settings']) {
+    await expect(adminMenu.getByRole('link', { name })).toBeVisible();
   }
 
   await Promise.all([admin.context.close(), eng.context.close(), far.context.close()]);

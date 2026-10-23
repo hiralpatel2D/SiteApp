@@ -20,6 +20,7 @@
     "@vladmandic/human": "3.3.6",
     "better-auth": "1.7.7",
     "drizzle-orm": "^0.45.4",
+    "exceljs": "4.4.0",
     "hono": "^4.6.0",
     "pg": "^8.23.1",
     "sharp": "0.34.4",

@@ -9,6 +9,7 @@ import { logRoutes } from './log';
 import { reviewRoutes } from './review';
 import { registrationRoutes } from './registration';
 import { settingsRoutes } from './settings';
+import { summaryRoutes } from './summary';
 
 export type AttendanceDeps = { pools: Pools; config: Config; faceEngine: FaceEngine };
 
@@ -19,6 +20,7 @@ export function attendanceRoutes(deps: AttendanceDeps): Hono<AppEnv> {
   r.route('/settings', settingsRoutes() as unknown as Hono<TenantEnv>);
   r.route('/face', registrationRoutes(deps) as unknown as Hono<TenantEnv>);
   r.route('/', logRoutes() as unknown as Hono<TenantEnv>);
+  r.route('/', summaryRoutes() as unknown as Hono<TenantEnv>);
   r.route('/', reviewRoutes() as unknown as Hono<TenantEnv>);
   r.route('/', checkRoutes(deps) as unknown as Hono<TenantEnv>);
   return r as unknown as Hono<AppEnv>;

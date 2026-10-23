@@ -422,6 +422,64 @@ describe('Attendance admin and Home tile', () => {
     await waitFor(() => expect(calls['GET /api/attendance/log']!.length).toBeGreaterThan(1));
   });
 
+  it('monthly summary lists people with totals and offers the Excel download', async () => {
+    const cell = (date: string, status: string) => ({ date, status, in: null, out: null });
+    const calls = setup(['projects.view', 'attendance.review', 'attendance.export'], {
+      'GET /api/attendance/summary': () =>
+        json(200, {
+          projectName: 'Riverside Tower',
+          timezone: 'Asia/Kolkata',
+          month: '2026-10',
+          days: ['2026-10-01', '2026-10-02'],
+          people: [
+            {
+              membershipId: 'm1',
+              name: 'Asha Rao',
+              email: 'asha@x.test',
+              present: 1,
+              late: 1,
+              pending: 0,
+              absent: 1,
+              hours: 8.5,
+              cells: [cell('2026-10-01', 'late'), cell('2026-10-02', 'absent')],
+            },
+          ],
+        }),
+      'GET /api/attendance/export': () =>
+        new Response('xlsx', {
+          status: 200,
+          headers: {
+            'content-disposition': 'attachment; filename="attendance-Tower-2026-10.xlsx"',
+          },
+        }),
+    });
+    URL.createObjectURL = vi.fn(() => 'blob:x');
+    URL.revokeObjectURL = vi.fn();
+    renderAt('/attendance/summary');
+    const row = (await screen.findByText('Asha Rao')).closest('li')!;
+    expect(within(row).getByText('Present 1 · Late 1 · Pending 0 · Absent 1 · 8.5 h')).toBeTruthy();
+    expect(within(row).getByRole('img', { name: 'Asha Rao, day by day' })).toBeTruthy();
+    await userEvent.click(screen.getByRole('button', { name: 'Download Excel' }));
+    await waitFor(() => expect(calls['GET /api/attendance/export']).toHaveLength(1));
+    expect(URL.createObjectURL).toHaveBeenCalled();
+  });
+
+  it('monthly summary hides Download Excel without the export capability', async () => {
+    setup(['projects.view', 'attendance.review'], {
+      'GET /api/attendance/summary': () =>
+        json(200, {
+          projectName: 'Riverside Tower',
+          timezone: 'Asia/Kolkata',
+          month: '2026-10',
+          days: [],
+          people: [],
+        }),
+    });
+    renderAt('/attendance/summary');
+    await screen.findByText(/No one is assigned/);
+    expect(screen.queryByRole('button', { name: 'Download Excel' })).toBeNull();
+  });
+
   it('approvals show reasons for a pending check-in', async () => {
     let loads = 0;
     const calls = setup(['attendance.review'], {

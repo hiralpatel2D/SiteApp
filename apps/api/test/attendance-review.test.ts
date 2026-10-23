@@ -13,6 +13,7 @@ import {
 } from '../src/db/schema';
 import { createFakeEngine, FAKE_EMBEDDING, fakeEmbedding } from '../src/attendance/face/fake';
 import { encryptTemplate } from '../src/attendance/face/template';
+import ExcelJS from 'exceljs';
 import { ownerDb, useTestDb } from './helpers/db';
 import { req, seedMember, testApp } from './helpers/auth';
 
@@ -441,6 +442,102 @@ describe('attendance pending review', () => {
         expect(res.status).toBe(400);
         expect((await errorOf(res)).code).toBe('bad_range');
       }
+    });
+  });
+
+  describe('monthly summary and export', () => {
+    type Sum = {
+      projectName: string;
+      people: { name: string; present: number; pending: number }[];
+    };
+
+    it('summary needs the review capability and counts a pending check-in', async () => {
+      const ctx = await setup();
+      await pendingEntry(ctx);
+      const res = await asCoord(ctx, `/summary?projectId=${ctx.p1}&month=2026-10`);
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as Sum;
+      expect(body.projectName).toBe('Tower');
+      const w = body.people.find((p) => p.name === 'w');
+      expect(w).toMatchObject({ present: 0, pending: 1 });
+      expect((await asWorker(ctx, `/summary?projectId=${ctx.p1}&month=2026-10`)).status).toBe(403);
+    });
+
+    it('rejects a bad month and a project the person cannot see', async () => {
+      const ctx = await setup();
+      const bad = await asCoord(ctx, `/summary?projectId=${ctx.p1}&month=2026-99`);
+      expect(bad.status).toBe(400);
+      expect((await errorOf(bad)).code).toBe('bad_month');
+      expect((await asCoord(ctx, `/summary?projectId=${ctx.p2}&month=2026-10`)).status).toBe(404);
+    });
+
+    it('export gives a real .xlsx with Summary, Daily and Entries, and is audited', async () => {
+      const ctx = await setup();
+      await pendingEntry(ctx);
+      const admin = await seedMember(ctx.co.companyId, 'admin', 'admin@alpha.test', {
+        app: ctx.app,
+      });
+      const res = await req(ctx.app, `/api/attendance/export?projectId=${ctx.p1}&month=2026-10`, {
+        cookie: admin.cookie,
+        company: ctx.co.companyId,
+      });
+      expect(res.status).toBe(200);
+      expect(res.headers.get('content-type')).toContain('spreadsheetml.sheet');
+      expect(res.headers.get('content-disposition')).toBe(
+        'attachment; filename="attendance-Tower-2026-10.xlsx"',
+      );
+      const wb = new ExcelJS.Workbook();
+      await wb.xlsx.load(Buffer.from(await res.arrayBuffer()) as unknown as ArrayBuffer);
+      expect(wb.worksheets.map((w) => w.name)).toEqual(['Summary', 'Daily', 'Entries']);
+      const entries = wb.getWorksheet('Entries')!;
+      expect(entries.getRow(2).getCell(2).value).toBe('w');
+      expect(entries.getRow(2).getCell(5).value).toBe('pending');
+      const summary = wb.getWorksheet('Summary')!;
+      const names: unknown[] = [];
+      summary.eachRow((row) => names.push(row.getCell(1).value));
+      expect(names).toContain('w');
+      const [audit] = await ownerDb
+        .select()
+        .from(auditLog)
+        .where(eq(auditLog.action, 'attendance.exported'));
+      expect(audit!.entityId).toBe(ctx.p1);
+    });
+
+    it('a deactivated person with entries still shows; one without does not', async () => {
+      const ctx = await setup();
+      await pendingEntry(ctx);
+      await ownerDb
+        .update(memberships)
+        .set({ status: 'deactivated' })
+        .where(eq(memberships.id, ctx.worker.membershipId));
+      const body = (await (
+        await asCoord(ctx, `/summary?projectId=${ctx.p1}&month=2026-10`)
+      ).json()) as Sum;
+      expect(body.people.map((p) => p.name)).toContain('w');
+      const other = (await (
+        await asCoord(ctx, `/summary?projectId=${ctx.p1}&month=2026-09`)
+      ).json()) as Sum;
+      expect(other.people.map((p) => p.name)).not.toContain('w');
+    });
+
+    it('limits exports per member (a heavy request) with 429', async () => {
+      const ctx = await setup();
+      const admin = await seedMember(ctx.co.companyId, 'admin', 'admin2@alpha.test', {
+        app: ctx.app,
+      });
+      const go = () =>
+        req(ctx.app, `/api/attendance/export?projectId=${ctx.p1}&month=2026-10`, {
+          cookie: admin.cookie,
+          company: ctx.co.companyId,
+        });
+      for (let i = 0; i < 6; i++) expect((await go()).status).toBe(200);
+      expect((await go()).status).toBe(429);
+    });
+
+    it('export is forbidden without attendance.export (a coordinator has review only)', async () => {
+      const ctx = await setup();
+      const res = await asCoord(ctx, `/export?projectId=${ctx.p1}&month=2026-10`);
+      expect(res.status).toBe(403);
     });
   });
 });
