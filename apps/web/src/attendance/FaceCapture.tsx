@@ -7,7 +7,6 @@ import {
   CameraPreview,
   CameraPrompt,
   CAMERA_FAILED,
-  FRAME_GAP_MS,
   GUIDE_FAILED,
   GUIDE_PROMPTS,
   MAX_GUIDE_FAILURES,
@@ -20,12 +19,16 @@ type Ready = Extract<GuideState, { kind: 'ready' }>;
 
 const STRAIGHT_PROMPT = 'Look straight at the camera';
 
-/** The poses, in order, and how many frames each gives (5 in all). */
+/**
+ * Gap between the straight-ahead frames. Longer than a check-in's, so natural small
+ * movements keep the frames from looking identical to the server's replay check.
+ */
+const STRAIGHT_GAP_MS = 500;
+
+/** The steps, in order, and how many frames each gives (5 in all): one blink, then straight. */
 const POSES: { prompt: string; ok: (s: Ready) => boolean; frames: number }[] = [
   { prompt: 'Blink once', ok: (s) => s.blinked, frames: 1 },
-  { prompt: 'Turn your head left', ok: (s) => s.yaw === 'left', frames: 1 },
-  { prompt: 'Turn your head right', ok: (s) => s.yaw === 'right', frames: 1 },
-  { prompt: STRAIGHT_PROMPT, ok: (s) => s.yaw === 'centre', frames: 2 },
+  { prompt: STRAIGHT_PROMPT, ok: () => true, frames: 4 },
 ];
 
 /** The pose prompt of each frame sent, in order. */
@@ -50,8 +53,8 @@ type Props = {
 };
 
 /**
- * Selfie camera for face registration: blink, turn left, turn right, look straight,
- * taking frames at each pose. The camera is released on every exit.
+ * Selfie camera for face registration: blink once, then look straight at the camera.
+ * No head turns. The camera is released on every exit.
  */
 export function FaceCapture({ onCaptured, onError, onCancel }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -109,7 +112,7 @@ export function FaceCapture({ onCaptured, onError, onCancel }: Props) {
             const got: string[] = [];
             try {
               for (let i = 0; i < want.frames; i++) {
-                if (i > 0) await sleep(FRAME_GAP_MS);
+                if (i > 0) await sleep(STRAIGHT_GAP_MS);
                 if (!live) return;
                 got.push(await guide.capture());
               }
