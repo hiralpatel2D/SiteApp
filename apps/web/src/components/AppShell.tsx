@@ -253,6 +253,12 @@ function MenuLinks({ shell }: { shell: Shell }) {
           Projects
         </Link>
       )}
+      {can('attendance.view') && (
+        <Link to="/attendance/log" className={item}>
+          <Icon name="clock" />
+          Attendance log
+        </Link>
+      )}
       {(can('attendance.review') || can('attendance.approve_face')) && (
         <Link to="/attendance/approvals" className={item}>
           <Icon name="bell" />

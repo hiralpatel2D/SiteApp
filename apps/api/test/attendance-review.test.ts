@@ -386,4 +386,61 @@ describe('attendance pending review', () => {
     });
     expect((await list(ctx)).map((r) => r.id)).toEqual([early, late]);
   });
+
+  describe('attendance log', () => {
+    type Log = {
+      scope: string;
+      entries: { id: string; name: string; own: boolean; status: string; workDate: string }[];
+    };
+    const range = '&from=2026-10-01&to=2026-10-31';
+
+    it('my log lists only my entries, with every status', async () => {
+      const ctx = await setup();
+      const mine = await pendingEntry(ctx);
+      await pendingEntry(ctx, { membershipId: ctx.coord.membershipId });
+      const res = await asWorker(ctx, `/log?projectId=${ctx.p1}${range}`);
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as Log;
+      expect(body.scope).toBe('me');
+      expect(body.entries).toHaveLength(1);
+      expect(body.entries[0]).toMatchObject({ id: mine, own: true, status: 'pending', name: 'w' });
+    });
+
+    it('team log lists everyone on the project for a reviewer, and is 403 for others', async () => {
+      const ctx = await setup();
+      await pendingEntry(ctx);
+      await pendingEntry(ctx, { membershipId: ctx.coord.membershipId });
+      const body = (await (
+        await asCoord(ctx, `/log?projectId=${ctx.p1}${range}&scope=team`)
+      ).json()) as Log;
+      expect(body.scope).toBe('team');
+      expect(body.entries).toHaveLength(2);
+      expect(body.entries.filter((e) => e.own)).toHaveLength(1);
+      const res = await asWorker(ctx, `/log?projectId=${ctx.p1}${range}&scope=team`);
+      expect(res.status).toBe(403);
+    });
+
+    it('is limited to the dates asked for and to visible projects', async () => {
+      const ctx = await setup();
+      await pendingEntry(ctx);
+      const other = (await (
+        await asWorker(ctx, `/log?projectId=${ctx.p1}&from=2026-09-01&to=2026-09-30`)
+      ).json()) as Log;
+      expect(other.entries).toHaveLength(0);
+      expect((await asCoord(ctx, `/log?projectId=${ctx.p2}${range}`)).status).toBe(404);
+    });
+
+    it('rejects a bad or oversized date range with 400', async () => {
+      const ctx = await setup();
+      for (const q of [
+        '&from=2026-10-31&to=2026-10-01',
+        '&from=2026-01-01&to=2026-12-31',
+        '&from=nope&to=2026-10-01',
+      ]) {
+        const res = await asWorker(ctx, `/log?projectId=${ctx.p1}${q}`);
+        expect(res.status).toBe(400);
+        expect((await errorOf(res)).code).toBe('bad_range');
+      }
+    });
+  });
 });

@@ -20,6 +20,7 @@ import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as SetupRouteImport } from './routes/setup'
 import { Route as TeamRouteImport } from './routes/team'
 import { Route as AttendanceApprovalsRouteImport } from './routes/attendance_.approvals'
+import { Route as AttendanceLogRouteImport } from './routes/attendance_.log'
 import { Route as AttendanceRegisterRouteImport } from './routes/attendance_.register'
 import { Route as AttendanceSettingsRouteImport } from './routes/attendance_.settings'
 import { Route as InviteTokenRouteImport } from './routes/invite.$token'
@@ -79,6 +80,11 @@ const AttendanceApprovalsRoute = AttendanceApprovalsRouteImport.update({
   path: '/attendance/approvals',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AttendanceLogRoute = AttendanceLogRouteImport.update({
+  id: '/attendance_/log',
+  path: '/attendance/log',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AttendanceRegisterRoute = AttendanceRegisterRouteImport.update({
   id: '/attendance_/register',
   path: '/attendance/register',
@@ -107,6 +113,7 @@ export interface FileRoutesByFullPath {
   '/setup': typeof SetupRoute
   '/team': typeof TeamRoute
   '/attendance/approvals': typeof AttendanceApprovalsRoute
+  '/attendance/log': typeof AttendanceLogRoute
   '/attendance/register': typeof AttendanceRegisterRoute
   '/attendance/settings': typeof AttendanceSettingsRoute
   '/invite/$token': typeof InviteTokenRoute
@@ -123,6 +130,7 @@ export interface FileRoutesByTo {
   '/setup': typeof SetupRoute
   '/team': typeof TeamRoute
   '/attendance/approvals': typeof AttendanceApprovalsRoute
+  '/attendance/log': typeof AttendanceLogRoute
   '/attendance/register': typeof AttendanceRegisterRoute
   '/attendance/settings': typeof AttendanceSettingsRoute
   '/invite/$token': typeof InviteTokenRoute
@@ -140,6 +148,7 @@ export interface FileRoutesById {
   '/setup': typeof SetupRoute
   '/team': typeof TeamRoute
   '/attendance_/approvals': typeof AttendanceApprovalsRoute
+  '/attendance_/log': typeof AttendanceLogRoute
   '/attendance_/register': typeof AttendanceRegisterRoute
   '/attendance_/settings': typeof AttendanceSettingsRoute
   '/invite/$token': typeof InviteTokenRoute
@@ -158,6 +167,7 @@ export interface FileRouteTypes {
     | '/setup'
     | '/team'
     | '/attendance/approvals'
+    | '/attendance/log'
     | '/attendance/register'
     | '/attendance/settings'
     | '/invite/$token'
@@ -174,6 +184,7 @@ export interface FileRouteTypes {
     | '/setup'
     | '/team'
     | '/attendance/approvals'
+    | '/attendance/log'
     | '/attendance/register'
     | '/attendance/settings'
     | '/invite/$token'
@@ -190,6 +201,7 @@ export interface FileRouteTypes {
     | '/setup'
     | '/team'
     | '/attendance_/approvals'
+    | '/attendance_/log'
     | '/attendance_/register'
     | '/attendance_/settings'
     | '/invite/$token'
@@ -207,6 +219,7 @@ export interface RootRouteChildren {
   SetupRoute: typeof SetupRoute
   TeamRoute: typeof TeamRoute
   AttendanceApprovalsRoute: typeof AttendanceApprovalsRoute
+  AttendanceLogRoute: typeof AttendanceLogRoute
   AttendanceRegisterRoute: typeof AttendanceRegisterRoute
   AttendanceSettingsRoute: typeof AttendanceSettingsRoute
   InviteTokenRoute: typeof InviteTokenRoute
@@ -291,6 +304,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AttendanceApprovalsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/attendance_/log': {
+      id: '/attendance_/log'
+      path: '/attendance/log'
+      fullPath: '/attendance/log'
+      preLoaderRoute: typeof AttendanceLogRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/attendance_/register': {
       id: '/attendance_/register'
       path: '/attendance/register'
@@ -327,6 +347,7 @@ const rootRouteChildren: RootRouteChildren = {
   SetupRoute: SetupRoute,
   TeamRoute: TeamRoute,
   AttendanceApprovalsRoute: AttendanceApprovalsRoute,
+  AttendanceLogRoute: AttendanceLogRoute,
   AttendanceRegisterRoute: AttendanceRegisterRoute,
   AttendanceSettingsRoute: AttendanceSettingsRoute,
   InviteTokenRoute: InviteTokenRoute,

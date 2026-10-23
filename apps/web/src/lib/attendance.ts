@@ -176,3 +176,21 @@ export const approveEntry = (id: string, note?: string) =>
 
 export const rejectEntry = (id: string, note?: string) =>
   api<{ status: string }>(`${BASE}/pending/${seg(id)}/reject`, { body: { note } });
+
+export type LogEntry = {
+  id: string;
+  name: string;
+  own: boolean;
+  workDate: string;
+  kind: CheckKind;
+  at: string;
+  status: 'recorded' | 'pending' | 'approved' | 'rejected';
+  lateMin: number;
+  distanceM: number;
+  reasons: string[];
+};
+
+export const getLog = (projectId: string, from: string, to: string, scope: 'me' | 'team') =>
+  api<{ from: string; to: string; scope: 'me' | 'team'; entries: LogEntry[] }>(
+    `${BASE}/log?projectId=${seg(projectId)}&from=${seg(from)}&to=${seg(to)}&scope=${scope}`,
+  );
