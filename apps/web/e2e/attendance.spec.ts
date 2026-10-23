@@ -287,7 +287,7 @@ test('attendance: set up the site, register and approve faces, check in inside a
   await expect(people.getByRole('listitem').filter({ hasText: FAR_ENGINEER.name })).toContainText(
     'Present 1',
   );
-  const dayTable = a.getByRole('table', { name: 'Day by day' });
+  const dayTable = a.getByRole('table', { name: /^Day by day, \w+ \d{4}$/ });
   await expect(dayTable.getByRole('rowheader', { name: ENGINEER.name })).toBeVisible();
   await expect(dayTable.getByRole('columnheader').nth(1)).toContainText('01');
   await noHorizontalScroll(a);
@@ -311,6 +311,67 @@ test('attendance: set up the site, register and approve faces, check in inside a
   const adminMenu = a.getByRole('navigation', { name: 'Main menu' });
   for (const name of ['Attendance log', 'Monthly summary', 'Approvals', 'Site settings']) {
     await expect(adminMenu.getByRole('link', { name })).toBeVisible();
+  }
+
+  // 8. The Super Admin previews the app as the engineer (read-only), then exits.
+  await a.goto('/home');
+  await a.getByRole('button', { name: 'Open menu' }).click();
+  await a
+    .getByRole('navigation', { name: 'Main menu' })
+    .getByRole('link', { name: 'View as…' })
+    .click();
+  await expect(a).toHaveURL(/\/view-as$/);
+  await expect(a.getByRole('region', { name: 'Site Engineer' })).toContainText(ENGINEER.name);
+  await noHorizontalScroll(a);
+  await a.getByRole('button', { name: `View as ${ENGINEER.name}` }).click();
+  await expect(a).toHaveURL(/\/home$/);
+  await expect(a.getByText(`Viewing as ${ENGINEER.name} · Site Engineer · read-only`)).toBeVisible(
+    SLOW,
+  );
+  await noHorizontalScroll(a);
+
+  // What the engineer sees: their own log, no Everyone tab, no approvals or summary.
+  await a.goto('/attendance/log');
+  const viewed = a.getByRole('list', { name: 'Attendance by day' });
+  await expect(viewed).toContainText(/In \d\d:\d\d · Recorded/, SLOW);
+  await expect(viewed).not.toContainText(FAR_ENGINEER.name);
+  await expect(a.getByRole('tab', { name: 'Everyone' })).toHaveCount(0);
+  await a.goto('/attendance/approvals');
+  await expect(a.getByText('You do not have access to approvals.')).toBeVisible(SLOW);
+  await a.getByRole('button', { name: 'Open menu' }).click();
+  const viewMenu = a.getByRole('navigation', { name: 'Main menu' });
+  await expect(viewMenu.getByRole('link', { name: 'Attendance log' })).toBeVisible();
+  for (const name of ['Approvals', 'Site settings', 'Monthly summary']) {
+    await expect(viewMenu.getByRole('link', { name })).toHaveCount(0);
+  }
+  await expect(viewMenu.getByRole('link', { name: 'Switch view' })).toBeVisible();
+
+  // Read-only: the server refuses any change while viewing.
+  const write = await a.evaluate(async () => {
+    const company = localStorage.getItem('sd.company')!;
+    const { token } = JSON.parse(sessionStorage.getItem(`sd.viewas.${company}`)!) as {
+      token: string;
+    };
+    const res = await fetch('/api/projects', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'content-type': 'application/json', 'x-company-id': company, 'x-view-as': token },
+      body: JSON.stringify({ name: 'Nope', code: 'NO-1' }),
+    });
+    return { status: res.status, body: (await res.json()) as { error: { code: string } } };
+  });
+  expect(write.status).toBe(403);
+  expect(write.body.error.code).toBe('read_only_view');
+
+  // Exit: back to the Super Admin's own view, with everything again.
+  await a.getByRole('button', { name: 'Close menu' }).click();
+  await a.getByRole('button', { name: 'Exit view' }).click();
+  await expect(a).toHaveURL(/\/home$/);
+  await expect(a.getByText(/Viewing as/)).toHaveCount(0);
+  await a.getByRole('button', { name: 'Open menu' }).click();
+  const ownMenu = a.getByRole('navigation', { name: 'Main menu' });
+  for (const name of ['Approvals', 'Site settings', 'Monthly summary', 'View as…']) {
+    await expect(ownMenu.getByRole('link', { name })).toBeVisible();
   }
 
   await Promise.all([admin.context.close(), eng.context.close(), far.context.close()]);

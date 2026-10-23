@@ -1,4 +1,5 @@
 import { getActiveCompany } from './company';
+import { getViewAsToken } from './viewas';
 import { api, ApiError, toApiError } from './api';
 
 // Typed calls for /api/attendance (settings, face registration, check-in/out, review).
@@ -224,6 +225,8 @@ export async function downloadExport(projectId: string, month: string): Promise<
   const headers = new Headers();
   const company = getActiveCompany();
   if (company) headers.set('x-company-id', company);
+  const viewAs = getViewAsToken(company);
+  if (viewAs) headers.set('x-view-as', viewAs);
   let res: Response;
   try {
     res = await fetch(`${BASE}/export?projectId=${seg(projectId)}&month=${seg(month)}`, {

@@ -459,7 +459,8 @@ describe('Attendance admin and Home tile', () => {
     const people = await screen.findByRole('list', { name: 'People' });
     const row = within(people).getByText('Asha Rao').closest('li')!;
     expect(within(row).getByText('Present 1 · Late 1 · Pending 0 · Absent 1 · 8.5 h')).toBeTruthy();
-    const table = screen.getByRole('table', { name: 'Day by day' });
+    expect(screen.getByRole('heading', { name: 'Day by day · October 2026' })).toBeTruthy();
+    const table = screen.getByRole('table', { name: 'Day by day, October 2026' });
     // The dates are the column headers, with the weekday under each.
     expect(within(table).getByRole('columnheader', { name: /^01\s*Th/ })).toBeTruthy();
     expect(within(table).getByRole('columnheader', { name: /^02\s*Fr/ })).toBeTruthy();

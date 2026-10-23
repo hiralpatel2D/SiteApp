@@ -14,6 +14,8 @@ export type Pools = {
   ownerDb: Db;
   /** Without tenant context, RLS makes every tenant table look empty. */
   appDb: Db;
+  /** Signs "view as" tokens (the Super Admin's read-only preview of another person). */
+  viewAsSecret: string;
 };
 
 function makePool(connectionString: string, name: string): pg.Pool {
@@ -31,5 +33,6 @@ export function createPools(cfg: Config): Pools {
     app,
     ownerDb: drizzle(owner, { schema }),
     appDb: drizzle(app, { schema }),
+    viewAsSecret: cfg.betterAuthSecret,
   };
 }
