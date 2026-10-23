@@ -85,6 +85,7 @@ export function logRoutes(): Hono<AppEnv> {
       scope: team ? 'team' : 'me',
       entries: entries.map(({ membershipId, ...e }) => ({
         ...e,
+        memberId: membershipId,
         own: membershipId === t.membershipId,
       })),
     });

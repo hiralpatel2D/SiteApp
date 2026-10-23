@@ -16,6 +16,16 @@ declare module '@tanstack/react-router' {
 
 registerSW({ immediate: true });
 
+// A new version takes over the open page by itself, so a fix is never hidden behind a stale cache.
+if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+  let reloaded = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (reloaded) return;
+    reloaded = true;
+    window.location.reload();
+  });
+}
+
 const root = document.getElementById('root');
 if (!root) throw new Error('Missing #root element');
 createRoot(root).render(

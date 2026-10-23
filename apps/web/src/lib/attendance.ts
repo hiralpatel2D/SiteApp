@@ -181,6 +181,7 @@ export const rejectEntry = (id: string, note?: string) =>
 
 export type LogEntry = {
   id: string;
+  memberId: string;
   name: string;
   own: boolean;
   workDate: string;

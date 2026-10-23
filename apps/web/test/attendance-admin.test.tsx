@@ -385,16 +385,25 @@ describe('Attendance admin and Home tile', () => {
     expect(!!within(row).queryByText(/Another approver has to decide/)).toBe(!canDecide);
   });
 
-  it('attendance log shows my days, newest first, and the Everyone tab for reviewers', async () => {
-    const entry = (id: string, day: string, kind: string, status: string, name = 'Hiral') => ({
+  it('attendance log is one table: paired in/out per day, newest first, with tags', async () => {
+    const entry = (
+      id: string,
+      day: string,
+      kind: string,
+      status: string,
+      at: string,
+      name = 'Hiral',
+      lateMin = 0,
+    ) => ({
       id,
+      memberId: `m-${name}`,
       name,
       own: name === 'Hiral',
       workDate: day,
       kind,
-      at: AT,
+      at,
       status,
-      lateMin: kind === 'check_in' ? 12 : 0,
+      lateMin,
       distanceM: 4.2,
       reasons: [],
     });
@@ -405,21 +414,80 @@ describe('Attendance admin and Home tile', () => {
           to: '2026-10-31',
           scope: 'me',
           entries: [
-            entry('a', '2026-10-15', 'check_in', 'recorded'),
-            entry('b', '2026-10-16', 'check_in', 'approved'),
-            entry('c', '2026-10-16', 'check_out', 'recorded'),
+            entry('a', '2026-10-15', 'check_in', 'recorded', '2026-10-15T03:30:00Z'),
+            entry('b', '2026-10-16', 'check_in', 'approved', '2026-10-16T03:42:00Z', 'Hiral', 12),
+            entry('c', '2026-10-16', 'check_out', 'recorded', '2026-10-16T12:12:00Z'),
           ],
         }),
     });
     renderAt('/attendance/log');
-    const days = await screen.findByRole('list', { name: 'Attendance by day' });
-    const items = within(days).getAllByText(/\d{4}$/);
-    expect(items[0]!.textContent).toMatch(/16 Oct 2026/);
-    expect(items[1]!.textContent).toMatch(/15 Oct 2026/);
-    expect(within(days).getAllByText(/Late by 12 min/)).toHaveLength(2);
-    expect(within(days).getByText(/Approved/)).toBeTruthy();
+    const table = await screen.findByRole('table', { name: 'Attendance log' });
+    const rows = within(table).getAllByRole('row').slice(1);
+    expect(rows).toHaveLength(2);
+    expect(rows[0]!.textContent).toMatch(/16 Oct 2026/);
+    expect(rows[0]!.textContent).toMatch(/Late 12 min/);
+    expect(rows[0]!.textContent).toMatch(/Approved/);
+    expect(rows[0]!.textContent).toMatch(/8h 30m/);
+    expect(rows[1]!.textContent).toMatch(/15 Oct 2026/);
+    expect(rows[1]!.textContent).toMatch(/Recorded/);
+    expect(screen.getByRole('status').textContent).toBe('2 of 2 days shown');
     await userEvent.click(screen.getByRole('tab', { name: 'Everyone' }));
     await waitFor(() => expect(calls['GET /api/attendance/log']!.length).toBeGreaterThan(1));
+  });
+
+  it('attendance log filters by status capsule and late, searches by name and sorts columns', async () => {
+    const entry = (id: string, name: string, status: string, lateMin: number, day: string) => ({
+      id,
+      memberId: `m-${name}`,
+      name,
+      own: false,
+      workDate: day,
+      kind: 'check_in',
+      at: `${day}T03:30:00Z`,
+      status,
+      lateMin,
+      distanceM: 4.2,
+      reasons: [],
+    });
+    setup(['projects.view', 'attendance.view', 'attendance.review'], {
+      'GET /api/attendance/log': () =>
+        json(200, {
+          from: '2026-10-01',
+          to: '2026-10-31',
+          scope: 'team',
+          entries: [
+            entry('1', 'Asha Rao', 'approved', 0, '2026-10-14'),
+            entry('2', 'Ravi Kumar', 'pending', 20, '2026-10-14'),
+            entry('3', 'Sita Nair', 'rejected', 0, '2026-10-15'),
+          ],
+        }),
+    });
+    renderAt('/attendance/log');
+    await userEvent.click(await screen.findByRole('tab', { name: 'Everyone' }));
+    const names = () =>
+      within(screen.getByRole('table', { name: 'Attendance log' }))
+        .getAllByRole('row')
+        .slice(1)
+        .map((r) => r.textContent ?? '');
+    await waitFor(() => expect(names()).toHaveLength(3));
+    // Capsules carry the counts.
+    expect(screen.getByRole('button', { name: 'All 3' })).toBeTruthy();
+    await userEvent.click(screen.getByRole('button', { name: 'Waiting 1' }));
+    expect(names()).toHaveLength(1);
+    expect(names()[0]).toMatch(/Ravi Kumar/);
+    await userEvent.click(screen.getByRole('button', { name: 'Clear filters' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Late only 1' }));
+    expect(names()).toHaveLength(1);
+    await userEvent.click(screen.getByRole('button', { name: 'Clear filters' }));
+    await userEvent.type(screen.getByLabelText('Find a person'), 'sita');
+    expect(names()).toHaveLength(1);
+    expect(names()[0]).toMatch(/Sita Nair/);
+    await userEvent.clear(screen.getByLabelText('Find a person'));
+    // Sorting by name reads A to Z, then Z to A.
+    await userEvent.click(screen.getByRole('button', { name: 'Name' }));
+    expect(names()[0]).toMatch(/Asha Rao/);
+    await userEvent.click(screen.getByRole('button', { name: /^Name/ }));
+    expect(names()[0]).toMatch(/Sita Nair/);
   });
 
   it('monthly summary lists people with totals and offers the Excel download', async () => {
@@ -456,9 +524,15 @@ describe('Attendance admin and Home tile', () => {
     URL.createObjectURL = vi.fn(() => 'blob:x');
     URL.revokeObjectURL = vi.fn();
     renderAt('/attendance/summary');
-    const people = await screen.findByRole('list', { name: 'People' });
-    const row = within(people).getByText('Asha Rao').closest('li')!;
-    expect(within(row).getByText('Present 1 · Late 1 · Pending 0 · Absent 1 · 8.5 h')).toBeTruthy();
+    const table0 = await screen.findByRole('table', { name: 'Day by day, October 2026' });
+    const row = within(table0).getByRole('rowheader', { name: 'Asha Rao' }).closest('tr')!;
+    // Totals sit in the same row as the days: present, late, pending, absent, hours.
+    expect(
+      within(row)
+        .getAllByRole('cell')
+        .slice(0, 5)
+        .map((c) => c.textContent),
+    ).toEqual(['1', '1', '0', '1', '8.5']);
     expect(screen.getByRole('heading', { name: 'Day by day · October 2026' })).toBeTruthy();
     const table = screen.getByRole('table', { name: 'Day by day, October 2026' });
     // The dates are the column headers, with the weekday under each.

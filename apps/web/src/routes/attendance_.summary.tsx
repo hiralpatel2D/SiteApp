@@ -10,7 +10,6 @@ import { useActiveProjects } from '../attendance/useProjects';
 
 export const Route = createFileRoute('/attendance_/summary')({ component: Summary });
 
-const card = 'flex flex-col gap-2 rounded-[var(--r)] border border-line-soft bg-card p-4';
 const CODE: Record<DayStatus, string> = {
   present: 'P',
   late: 'L',
@@ -45,14 +44,75 @@ export const monthTitle = (month: string) =>
 const weekday = (d: string) =>
   new Date(`${d}T00:00:00Z`).toLocaleDateString('en-GB', { weekday: 'short', timeZone: 'UTC' });
 
-/** One table for the whole month: a header of dates, one row per person, scrolling sideways. */
+type TotalKey = 'name' | 'present' | 'late' | 'pending' | 'absent' | 'hours';
+const TOTALS: { key: TotalKey; label: string }[] = [
+  { key: 'present', label: 'Present' },
+  { key: 'late', label: 'Late' },
+  { key: 'pending', label: 'Pending' },
+  { key: 'absent', label: 'Absent' },
+  { key: 'hours', label: 'Hours' },
+];
+
+/** One table for the month: a row per person with totals, then a header of dates, scrolling sideways. */
 function DayTable({ data }: { data: MonthlySummary }) {
   const today = workDate(new Date());
+  const [search, setSearch] = useState('');
+  const [sort, setSort] = useState<{ key: TotalKey; dir: 'asc' | 'desc' }>({
+    key: 'name',
+    dir: 'asc',
+  });
+  const q = search.trim().toLowerCase();
+  const people = data.people
+    .filter((p) => q === '' || p.name.toLowerCase().includes(q))
+    .sort((a, b) => {
+      const sign = sort.dir === 'asc' ? 1 : -1;
+      const c =
+        sort.key === 'name'
+          ? a.name.toLowerCase().localeCompare(b.name.toLowerCase())
+          : a[sort.key] - b[sort.key];
+      return c * sign || a.name.toLowerCase().localeCompare(b.name.toLowerCase());
+    });
+  const toggle = (key: TotalKey) =>
+    setSort((cur) =>
+      cur.key === key
+        ? { key, dir: cur.dir === 'asc' ? 'desc' : 'asc' }
+        : { key, dir: key === 'name' ? 'asc' : 'desc' },
+    );
+  const sortHead = (key: TotalKey, label: string, cls: string) => (
+    <th
+      key={key}
+      scope="col"
+      aria-sort={sort.key === key ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}
+      className={`border-b border-line-soft px-2 py-1.5 font-medium ${cls}`}
+    >
+      <button
+        type="button"
+        onClick={() => toggle(key)}
+        className="cursor-pointer hover:text-accent"
+      >
+        {label}
+        {sort.key === key ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : ''}
+      </button>
+    </th>
+  );
   return (
-    <div className="flex flex-col gap-2">
+    <div className="flex flex-col gap-3">
       <h2 className="font-display text-[20px] font-extrabold uppercase leading-tight">
         {`Day by day · ${monthTitle(data.month)}`}
       </h2>
+      <div className="flex flex-col gap-1.5">
+        <label htmlFor="summary-search" className={labelClass}>
+          Find a person
+        </label>
+        <input
+          id="summary-search"
+          type="search"
+          value={search}
+          placeholder="Type a name"
+          onChange={(ev) => setSearch(ev.target.value)}
+          className={inputClass}
+        />
+      </div>
       <div className="overflow-x-auto rounded-[var(--r)] border border-line-soft bg-card">
         <table
           aria-label={`Day by day, ${monthTitle(data.month)}`}
@@ -60,12 +120,8 @@ function DayTable({ data }: { data: MonthlySummary }) {
         >
           <thead>
             <tr>
-              <th
-                scope="col"
-                className="sticky left-0 z-10 min-w-28 border-b border-r border-line-soft bg-card px-2 py-1.5 text-left font-medium"
-              >
-                Name
-              </th>
+              {sortHead('name', 'Name', 'sticky left-0 z-10 min-w-28 border-r bg-card text-left')}
+              {TOTALS.map((t) => sortHead(t.key, t.label, 'bg-surface text-center'))}
               {data.days.map((d) => (
                 <th
                   key={d}
@@ -80,19 +136,27 @@ function DayTable({ data }: { data: MonthlySummary }) {
             </tr>
           </thead>
           <tbody>
-            {data.people.map((p) => (
+            {people.map((p) => (
               <tr key={p.membershipId}>
                 <th
                   scope="row"
-                  className="sticky left-0 z-10 max-w-36 truncate border-r border-line-soft bg-card px-2 py-1.5 text-left font-medium"
+                  className="sticky left-0 z-10 max-w-36 truncate border-b border-r border-line-soft bg-card px-2 py-1.5 text-left font-medium"
                 >
                   {p.name}
                 </th>
+                {TOTALS.map((t) => (
+                  <td
+                    key={t.key}
+                    className="border-b border-line-soft bg-surface px-2 py-1.5 text-center font-medium"
+                  >
+                    {p[t.key]}
+                  </td>
+                ))}
                 {p.cells.map((c) => (
                   <td
                     key={c.date}
                     title={`${c.date} · ${c.status}`}
-                    className={`h-8 text-center ${TONE[c.status]}`}
+                    className={`h-8 border-b border-line-soft text-center ${TONE[c.status]}`}
                   >
                     {CODE[c.status]}
                   </td>
@@ -102,6 +166,11 @@ function DayTable({ data }: { data: MonthlySummary }) {
           </tbody>
         </table>
       </div>
+      {people.length === 0 && (
+        <p className="rounded-[var(--r)] border border-line-soft bg-card p-4 text-muted">
+          Nobody matches that name.
+        </p>
+      )}
     </div>
   );
 }
@@ -195,18 +264,6 @@ function SummaryBody() {
             <p className="text-sm text-muted">
               P present · L late (counted in present) · ? waiting for approval · A absent
             </p>
-            <ul aria-label="People" className="flex flex-col gap-3">
-              {data.people.map((p) => (
-                <li key={p.membershipId} className={card}>
-                  <span className="break-words font-display text-[20px] font-extrabold uppercase leading-tight">
-                    {p.name}
-                  </span>
-                  <p className="font-medium">
-                    {`Present ${p.present} · Late ${p.late} · Pending ${p.pending} · Absent ${p.absent} · ${p.hours} h`}
-                  </p>
-                </li>
-              ))}
-            </ul>
             <DayTable data={data} />
           </>
         ))}
