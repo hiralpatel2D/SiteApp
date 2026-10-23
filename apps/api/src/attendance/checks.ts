@@ -23,7 +23,7 @@ import { parseBody } from '../http/body';
 import { AppError } from '../http/errors';
 import { requireCap, runInTenant, type Tenant, type TenantEnv } from '../tenant/context';
 import type { FaceEngine, FaceReading } from './face/engine';
-import { framesAgree, framesDistinct } from './face/frames';
+import { framesAgree, hasDuplicateFrames } from './face/frames';
 import { decryptTemplate } from './face/template';
 import { ipBackstop, memberLimit } from './limits';
 import { canSeeProject } from './reach';
@@ -134,7 +134,7 @@ function faceSignals(
     real: Math.min(...readings.map((r) => r.real)),
     live: Math.min(...readings.map((r) => r.live)),
     framesAgree: framesAgree(readings, engine),
-    framesDistinct: framesDistinct(jpegs, readings),
+    framesDistinct: !hasDuplicateFrames(jpegs),
   };
 }
 
@@ -213,6 +213,14 @@ export function checkRoutes({ config, faceEngine }: CheckDeps): Hono<AppEnv> {
         { distanceM, radiusM: settings.radiusM, accuracyM: body.accuracyM, ...face },
         thresholds,
       );
+      if (decision.status === 'pending') {
+        // Scores only (no images or names), so thresholds can be tuned from real phones.
+        console.warn(
+          `Check ${body.kind} pending: ${decision.reasons.join('; ')} | faces=${face.faces} ` +
+            `w=${face.minFaceWidth} sim=${face.similarity} real=${face.real} live=${face.live} ` +
+            `agree=${face.framesAgree} distinct=${face.framesDistinct}`,
+        );
+      }
       const lateMin =
         body.kind === 'check_in'
           ? lateMinutes(now, settings.startTime, settings.lateAfterMin, settings.timezone)

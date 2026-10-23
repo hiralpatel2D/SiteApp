@@ -86,6 +86,10 @@ export type PendingFace = {
 
 export type PendingEntry = {
   id: string;
+  /** True for the signed-in person's own check-in. */
+  own: boolean;
+  /** False when someone else must decide it (your own, while another reviewer exists). */
+  canDecide: boolean;
   name: string;
   projectName: string;
   kind: CheckKind;

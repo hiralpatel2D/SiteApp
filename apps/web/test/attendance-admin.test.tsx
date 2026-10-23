@@ -77,6 +77,8 @@ const entry = (status: string) => ({
 
 const pendingEntry = {
   id: 'e1',
+  own: false,
+  canDecide: true,
   name: 'Ravi Kumar',
   projectName: 'Riverside Tower',
   kind: 'check_in',
@@ -362,6 +364,25 @@ describe('Attendance admin and Home tile', () => {
     expect(within(row).getByRole('img', { name: 'Hiral Owner' })).toBeTruthy();
     expect(!!within(row).queryByRole('button', { name: 'Approve' })).toBe(canDecide);
     expect(!!within(row).queryByText(/Another approver has to approve/)).toBe(!canDecide);
+  });
+
+  it.each([
+    ['cannot be decided yet', false],
+    ['can be decided by the only reviewer', true],
+  ])('approvals list your own check-in that %s', async (_, canDecide) => {
+    setup(['attendance.review'], {
+      'GET /api/attendance/pending': () =>
+        json(200, {
+          entries: [{ ...pendingEntry, id: 'mine', name: 'Hiral Owner', own: true, canDecide }],
+          total: 1,
+        }),
+    });
+    renderAt('/attendance/approvals');
+    const row = (await screen.findByText('Hiral Owner')).closest('li')!;
+    expect(within(row).getByText('Your check-in')).toBeTruthy();
+    expect(within(row).getByText('Outside site radius (240 m, allowed 100 m)')).toBeTruthy();
+    expect(!!within(row).queryByRole('button', { name: 'Approve' })).toBe(canDecide);
+    expect(!!within(row).queryByText(/Another approver has to decide/)).toBe(!canDecide);
   });
 
   it('approvals show reasons for a pending check-in', async () => {

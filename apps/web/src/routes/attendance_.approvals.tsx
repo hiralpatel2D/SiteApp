@@ -259,6 +259,11 @@ function CheckIns() {
           {entries.map((e) => (
             <li key={e.id} className={row}>
               <div className="flex flex-col">
+                {e.own && (
+                  <span className="font-mono text-[12px] uppercase tracking-widest text-muted">
+                    Your check-in
+                  </span>
+                )}
                 <span className="break-words font-display text-[22px] font-extrabold uppercase leading-tight">
                   {e.name}
                 </span>
@@ -293,40 +298,57 @@ function CheckIns() {
                   ? 'Match score —'
                   : `Match score ${(Math.floor(e.similarity * 100 + 1e-9) / 100).toFixed(2)}`}
               </p>
-              <div className="flex flex-col gap-1.5">
-                <label htmlFor={`note-${e.id}`} className={labelClass}>
-                  Note (optional)
-                </label>
-                <input
-                  id={`note-${e.id}`}
-                  maxLength={500}
-                  value={notes[e.id] ?? ''}
-                  onChange={(ev) => setNotes((n) => ({ ...n, [e.id]: ev.target.value }))}
-                  className={inputClass}
-                />
-              </div>
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  className={approveButton}
-                  disabled={busy !== null}
-                  onClick={() =>
-                    void decide(e.id, () => approveEntry(e.id, noteOf(e.id)), `Approved ${e.name}.`)
-                  }
-                >
-                  Approve
-                </button>
-                <button
-                  type="button"
-                  className={rejectButton}
-                  disabled={busy !== null}
-                  onClick={() =>
-                    void decide(e.id, () => rejectEntry(e.id, noteOf(e.id)), `Rejected ${e.name}.`)
-                  }
-                >
-                  Reject
-                </button>
-              </div>
+              {!e.canDecide && (
+                <p className="text-muted">
+                  Another approver has to decide your check-in. Ask a senior to open Approvals.
+                </p>
+              )}
+              {e.canDecide && (
+                <>
+                  <div className="flex flex-col gap-1.5">
+                    <label htmlFor={`note-${e.id}`} className={labelClass}>
+                      Note (optional)
+                    </label>
+                    <input
+                      id={`note-${e.id}`}
+                      maxLength={500}
+                      value={notes[e.id] ?? ''}
+                      onChange={(ev) => setNotes((n) => ({ ...n, [e.id]: ev.target.value }))}
+                      className={inputClass}
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      className={approveButton}
+                      disabled={busy !== null}
+                      onClick={() =>
+                        void decide(
+                          e.id,
+                          () => approveEntry(e.id, noteOf(e.id)),
+                          `Approved ${e.name}.`,
+                        )
+                      }
+                    >
+                      Approve
+                    </button>
+                    <button
+                      type="button"
+                      className={rejectButton}
+                      disabled={busy !== null}
+                      onClick={() =>
+                        void decide(
+                          e.id,
+                          () => rejectEntry(e.id, noteOf(e.id)),
+                          `Rejected ${e.name}.`,
+                        )
+                      }
+                    >
+                      Reject
+                    </button>
+                  </div>
+                </>
+              )}
             </li>
           ))}
         </ul>

@@ -11,6 +11,15 @@ import type { FaceEngine, FaceReading } from './types';
  */
 export const NEAR_IDENTICAL_MAD = 1.0;
 
+/**
+ * True when any two frames are byte-identical: one photo sent more than once. This is the replay
+ * check registration and check-in use now. The stricter near-identical rule (framesDistinct below)
+ * refused still, genuine people, and its threshold is not measured on real phones.
+ */
+export function hasDuplicateFrames(jpegs: Buffer[]): boolean {
+  return jpegs.some((a, i) => jpegs.some((b, j) => j > i && a.equals(b)));
+}
+
 /** Frames of one check must be the same person: every pair at least this similar. */
 export const SAME_PERSON_MIN = 0.5;
 
