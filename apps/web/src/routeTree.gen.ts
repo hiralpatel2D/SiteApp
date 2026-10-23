@@ -23,6 +23,7 @@ import { Route as AttendanceApprovalsRouteImport } from './routes/attendance_.ap
 import { Route as AttendanceLogRouteImport } from './routes/attendance_.log'
 import { Route as AttendanceRegisterRouteImport } from './routes/attendance_.register'
 import { Route as AttendanceSettingsRouteImport } from './routes/attendance_.settings'
+import { Route as AttendanceSummaryRouteImport } from './routes/attendance_.summary'
 import { Route as InviteTokenRouteImport } from './routes/invite.$token'
 
 const IndexRoute = IndexRouteImport.update({
@@ -95,6 +96,11 @@ const AttendanceSettingsRoute = AttendanceSettingsRouteImport.update({
   path: '/attendance/settings',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AttendanceSummaryRoute = AttendanceSummaryRouteImport.update({
+  id: '/attendance_/summary',
+  path: '/attendance/summary',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const InviteTokenRoute = InviteTokenRouteImport.update({
   id: '/invite/$token',
   path: '/invite/$token',
@@ -116,6 +122,7 @@ export interface FileRoutesByFullPath {
   '/attendance/log': typeof AttendanceLogRoute
   '/attendance/register': typeof AttendanceRegisterRoute
   '/attendance/settings': typeof AttendanceSettingsRoute
+  '/attendance/summary': typeof AttendanceSummaryRoute
   '/invite/$token': typeof InviteTokenRoute
 }
 export interface FileRoutesByTo {
@@ -133,6 +140,7 @@ export interface FileRoutesByTo {
   '/attendance/log': typeof AttendanceLogRoute
   '/attendance/register': typeof AttendanceRegisterRoute
   '/attendance/settings': typeof AttendanceSettingsRoute
+  '/attendance/summary': typeof AttendanceSummaryRoute
   '/invite/$token': typeof InviteTokenRoute
 }
 export interface FileRoutesById {
@@ -151,6 +159,7 @@ export interface FileRoutesById {
   '/attendance_/log': typeof AttendanceLogRoute
   '/attendance_/register': typeof AttendanceRegisterRoute
   '/attendance_/settings': typeof AttendanceSettingsRoute
+  '/attendance_/summary': typeof AttendanceSummaryRoute
   '/invite/$token': typeof InviteTokenRoute
 }
 export interface FileRouteTypes {
@@ -170,6 +179,7 @@ export interface FileRouteTypes {
     | '/attendance/log'
     | '/attendance/register'
     | '/attendance/settings'
+    | '/attendance/summary'
     | '/invite/$token'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -187,6 +197,7 @@ export interface FileRouteTypes {
     | '/attendance/log'
     | '/attendance/register'
     | '/attendance/settings'
+    | '/attendance/summary'
     | '/invite/$token'
   id:
     | '__root__'
@@ -204,6 +215,7 @@ export interface FileRouteTypes {
     | '/attendance_/log'
     | '/attendance_/register'
     | '/attendance_/settings'
+    | '/attendance_/summary'
     | '/invite/$token'
   fileRoutesById: FileRoutesById
 }
@@ -222,6 +234,7 @@ export interface RootRouteChildren {
   AttendanceLogRoute: typeof AttendanceLogRoute
   AttendanceRegisterRoute: typeof AttendanceRegisterRoute
   AttendanceSettingsRoute: typeof AttendanceSettingsRoute
+  AttendanceSummaryRoute: typeof AttendanceSummaryRoute
   InviteTokenRoute: typeof InviteTokenRoute
 }
 
@@ -325,6 +338,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AttendanceSettingsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/attendance_/summary': {
+      id: '/attendance_/summary'
+      path: '/attendance/summary'
+      fullPath: '/attendance/summary'
+      preLoaderRoute: typeof AttendanceSummaryRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/invite/$token': {
       id: '/invite/$token'
       path: '/invite/$token'
@@ -350,6 +370,7 @@ const rootRouteChildren: RootRouteChildren = {
   AttendanceLogRoute: AttendanceLogRoute,
   AttendanceRegisterRoute: AttendanceRegisterRoute,
   AttendanceSettingsRoute: AttendanceSettingsRoute,
+  AttendanceSummaryRoute: AttendanceSummaryRoute,
   InviteTokenRoute: InviteTokenRoute,
 }
 export const routeTree = rootRouteImport

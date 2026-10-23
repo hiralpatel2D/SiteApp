@@ -259,6 +259,12 @@ function MenuLinks({ shell }: { shell: Shell }) {
           Attendance log
         </Link>
       )}
+      {can('attendance.review') && (
+        <Link to="/attendance/summary" className={item}>
+          <Icon name="clock" />
+          Monthly summary
+        </Link>
+      )}
       {(can('attendance.review') || can('attendance.approve_face')) && (
         <Link to="/attendance/approvals" className={item}>
           <Icon name="bell" />

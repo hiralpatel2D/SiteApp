@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
-import { createFileRoute } from '@tanstack/react-router';
+import { Link, createFileRoute } from '@tanstack/react-router';
 import { workDate } from '@sitediary/shared';
 import { errorMessage } from '../lib/api';
 import { getLog, type LogEntry } from '../lib/attendance';
 import { getActiveProject } from '../lib/project';
 import { AppShell, useCan, useShell } from '../components/AppShell';
-import { Alert, Loading, inputClass, labelClass } from '../components/ui';
+import { Alert, Loading, inputClass, labelClass, secondaryButton } from '../components/ui';
 import { timeOf } from '../attendance/time';
 import { useActiveProjects } from '../attendance/useProjects';
 
@@ -93,6 +93,11 @@ function LogBody() {
       <p className="font-display text-[22px] font-extrabold uppercase leading-tight">
         {project.name}
       </p>
+      {canTeam && (
+        <Link to="/attendance/summary" className={`${secondaryButton} grid place-items-center`}>
+          Monthly summary
+        </Link>
+      )}
       {canTeam && (
         <div role="tablist" aria-label="Log" className="grid grid-cols-2 gap-2">
           {(['me', 'team'] as const).map((s) => (

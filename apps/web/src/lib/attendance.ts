@@ -1,4 +1,5 @@
-import { api, ApiError } from './api';
+import { getActiveCompany } from './company';
+import { api, ApiError, toApiError } from './api';
 
 // Typed calls for /api/attendance (settings, face registration, check-in/out, review).
 
@@ -194,3 +195,55 @@ export const getLog = (projectId: string, from: string, to: string, scope: 'me' 
   api<{ from: string; to: string; scope: 'me' | 'team'; entries: LogEntry[] }>(
     `${BASE}/log?projectId=${seg(projectId)}&from=${seg(from)}&to=${seg(to)}&scope=${scope}`,
   );
+
+export type DayStatus = 'present' | 'late' | 'pending' | 'absent' | 'open';
+
+export type MonthlySummary = {
+  projectName: string;
+  timezone: string;
+  month: string;
+  days: string[];
+  people: {
+    membershipId: string;
+    name: string;
+    email: string;
+    present: number;
+    late: number;
+    pending: number;
+    absent: number;
+    hours: number;
+    cells: { date: string; status: DayStatus; in: string | null; out: string | null }[];
+  }[];
+};
+
+export const getSummary = (projectId: string, month: string) =>
+  api<MonthlySummary>(`${BASE}/summary?projectId=${seg(projectId)}&month=${seg(month)}`);
+
+/** Downloads the month's Excel file (needs `attendance.export`). */
+export async function downloadExport(projectId: string, month: string): Promise<void> {
+  const headers = new Headers();
+  const company = getActiveCompany();
+  if (company) headers.set('x-company-id', company);
+  let res: Response;
+  try {
+    res = await fetch(`${BASE}/export?projectId=${seg(projectId)}&month=${seg(month)}`, {
+      credentials: 'include',
+      headers,
+    });
+  } catch {
+    throw new ApiError(0, 'unavailable', 'The service is busy. Try again shortly.');
+  }
+  if (!res.ok) throw await toApiError(res);
+  const blob = await res.blob();
+  const name =
+    /filename="([^"]+)"/.exec(res.headers.get('content-disposition') ?? '')?.[1] ??
+    `attendance-${month}.xlsx`;
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10_000);
+}
