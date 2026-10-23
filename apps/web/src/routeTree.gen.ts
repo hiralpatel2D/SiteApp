@@ -19,6 +19,7 @@ import { Route as ProjectsRouteImport } from './routes/projects'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as SetupRouteImport } from './routes/setup'
 import { Route as TeamRouteImport } from './routes/team'
+import { Route as ViewAsRouteImport } from './routes/view-as'
 import { Route as AttendanceApprovalsRouteImport } from './routes/attendance_.approvals'
 import { Route as AttendanceLogRouteImport } from './routes/attendance_.log'
 import { Route as AttendanceRegisterRouteImport } from './routes/attendance_.register'
@@ -76,6 +77,11 @@ const TeamRoute = TeamRouteImport.update({
   path: '/team',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ViewAsRoute = ViewAsRouteImport.update({
+  id: '/view-as',
+  path: '/view-as',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AttendanceApprovalsRoute = AttendanceApprovalsRouteImport.update({
   id: '/attendance_/approvals',
   path: '/attendance/approvals',
@@ -118,6 +124,7 @@ export interface FileRoutesByFullPath {
   '/reset-password': typeof ResetPasswordRoute
   '/setup': typeof SetupRoute
   '/team': typeof TeamRoute
+  '/view-as': typeof ViewAsRoute
   '/attendance/approvals': typeof AttendanceApprovalsRoute
   '/attendance/log': typeof AttendanceLogRoute
   '/attendance/register': typeof AttendanceRegisterRoute
@@ -136,6 +143,7 @@ export interface FileRoutesByTo {
   '/reset-password': typeof ResetPasswordRoute
   '/setup': typeof SetupRoute
   '/team': typeof TeamRoute
+  '/view-as': typeof ViewAsRoute
   '/attendance/approvals': typeof AttendanceApprovalsRoute
   '/attendance/log': typeof AttendanceLogRoute
   '/attendance/register': typeof AttendanceRegisterRoute
@@ -155,6 +163,7 @@ export interface FileRoutesById {
   '/reset-password': typeof ResetPasswordRoute
   '/setup': typeof SetupRoute
   '/team': typeof TeamRoute
+  '/view-as': typeof ViewAsRoute
   '/attendance_/approvals': typeof AttendanceApprovalsRoute
   '/attendance_/log': typeof AttendanceLogRoute
   '/attendance_/register': typeof AttendanceRegisterRoute
@@ -175,6 +184,7 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/setup'
     | '/team'
+    | '/view-as'
     | '/attendance/approvals'
     | '/attendance/log'
     | '/attendance/register'
@@ -193,6 +203,7 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/setup'
     | '/team'
+    | '/view-as'
     | '/attendance/approvals'
     | '/attendance/log'
     | '/attendance/register'
@@ -211,6 +222,7 @@ export interface FileRouteTypes {
     | '/reset-password'
     | '/setup'
     | '/team'
+    | '/view-as'
     | '/attendance_/approvals'
     | '/attendance_/log'
     | '/attendance_/register'
@@ -230,6 +242,7 @@ export interface RootRouteChildren {
   ResetPasswordRoute: typeof ResetPasswordRoute
   SetupRoute: typeof SetupRoute
   TeamRoute: typeof TeamRoute
+  ViewAsRoute: typeof ViewAsRoute
   AttendanceApprovalsRoute: typeof AttendanceApprovalsRoute
   AttendanceLogRoute: typeof AttendanceLogRoute
   AttendanceRegisterRoute: typeof AttendanceRegisterRoute
@@ -310,6 +323,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof TeamRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/view-as': {
+      id: '/view-as'
+      path: '/view-as'
+      fullPath: '/view-as'
+      preLoaderRoute: typeof ViewAsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/attendance_/approvals': {
       id: '/attendance_/approvals'
       path: '/attendance/approvals'
@@ -366,6 +386,7 @@ const rootRouteChildren: RootRouteChildren = {
   ResetPasswordRoute: ResetPasswordRoute,
   SetupRoute: SetupRoute,
   TeamRoute: TeamRoute,
+  ViewAsRoute: ViewAsRoute,
   AttendanceApprovalsRoute: AttendanceApprovalsRoute,
   AttendanceLogRoute: AttendanceLogRoute,
   AttendanceRegisterRoute: AttendanceRegisterRoute,

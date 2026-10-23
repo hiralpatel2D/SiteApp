@@ -4,6 +4,7 @@ import { Link, useNavigate, useRouterState } from '@tanstack/react-router';
 import { ApiError, api, errorMessage } from '../lib/api';
 import { fetchMe, isPasswordChangeRequired, signOut, type Me } from '../lib/auth';
 import { getActiveCompany, setActiveCompany } from '../lib/company';
+import { clearViewAs, type ViewAsPerson } from '../lib/viewas';
 import { Icon } from './icons';
 import { ThemeSwitcher } from './ThemeSwitcher';
 import { Alert, Loading, Logo, PageTitle, labelClass } from './ui';
@@ -12,6 +13,10 @@ export type CompanyContext = {
   company: { id: string; name: string; slug: string };
   role: { id: string; name: string; key: string | null };
   capabilities: string[];
+  /** The real signed-in person is the company's Super Admin and may preview others. */
+  canViewAs?: boolean;
+  /** Set while previewing another person (read-only). */
+  viewAs?: ViewAsPerson | null;
 };
 
 type Shell = { me: Me; ctx: CompanyContext | null };
@@ -115,6 +120,9 @@ export function AppShell({ title, company = true, children }: Props) {
 
   return (
     <div className="min-h-dvh md:pl-[272px]">
+      {shell?.ctx?.viewAs && (
+        <ViewAsBanner company={shell.ctx.company.id} person={shell.ctx.viewAs} />
+      )}
       {/* Phone top bar */}
       <header className="sticky top-0 z-20 flex items-center gap-3 border-b border-line bg-bg/95 px-4 py-3 backdrop-blur md:hidden">
         <button
@@ -139,7 +147,7 @@ export function AppShell({ title, company = true, children }: Props) {
           </svg>
         </button>
         <span className="min-w-0 truncate font-display text-[22px] font-extrabold uppercase leading-none">
-          Site Diary
+          {shell?.ctx?.viewAs ? `Viewing as ${shell.ctx.viewAs.name}` : 'Site Diary'}
         </span>
       </header>
 
@@ -224,6 +232,33 @@ export function AppShell({ title, company = true, children }: Props) {
   );
 }
 
+/** Leaves the preview: audited, then a clean reload in the Super Admin's own view. */
+async function exitViewAs(company: string) {
+  await api('/api/company/view-as/stop', { method: 'POST', body: {} }).catch(() => undefined);
+  clearViewAs(company);
+  window.location.assign('/home');
+}
+
+function ViewAsBanner({ company, person }: { company: string; person: ViewAsPerson }) {
+  return (
+    <div
+      role="status"
+      className="flex flex-wrap items-center gap-x-3 gap-y-1 bg-accent px-4 py-2 text-sm font-medium text-on-accent md:pl-[288px]"
+    >
+      <span className="min-w-0 break-words">
+        {`Viewing as ${person.name} · ${person.roleName} · read-only`}
+      </span>
+      <button
+        type="button"
+        onClick={() => void exitViewAs(company)}
+        className="ml-auto cursor-pointer rounded-full border border-current px-3 py-1 font-semibold hover:opacity-80"
+      >
+        Exit view
+      </button>
+    </div>
+  );
+}
+
 const item =
   'flex min-h-11 items-center gap-3 rounded-[calc(var(--r)*0.75)] px-3 font-medium text-text hover:bg-surface aria-[current=page]:bg-surface aria-[current=page]:font-semibold aria-[current=page]:shadow-[inset_3px_0_0_var(--accent)]';
 
@@ -283,7 +318,13 @@ function MenuLinks({ shell }: { shell: Shell }) {
           Team
         </Link>
       )}
-      {me.user.isPlatformAdmin && (
+      {ctx?.canViewAs && (
+        <Link to="/view-as" className={item}>
+          <Icon name="swap" />
+          {ctx.viewAs ? 'Switch view' : 'View as…'}
+        </Link>
+      )}
+      {me.user.isPlatformAdmin && !ctx?.viewAs && (
         <Link to="/platform" className={item}>
           <Icon name="building" />
           Platform admin

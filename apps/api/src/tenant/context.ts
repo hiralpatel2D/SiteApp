@@ -1,12 +1,13 @@
 import { Hono, type Context, type MiddlewareHandler } from 'hono';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import type pg from 'pg';
 import type { Capability } from '@sitediary/shared';
 import type { AppEnv } from '../auth/session';
 import type { Pools } from '../db/pools';
-import { roleCapabilities } from '../db/schema';
+import { memberships, roleCapabilities, roles, users } from '../db/schema';
 import { withTenant, type AppTx } from '../db/tenant';
 import { AppError } from '../http/errors';
+import { verifyViewAs } from './view-as-token';
 
 export type Tenant = {
   companyId: string;
@@ -17,9 +18,22 @@ export type Tenant = {
   capabilities: Set<Capability>;
 };
 
+/** Set while a Super Admin is previewing the app as another person (read-only). */
+export type ViewAs = {
+  membershipId: string;
+  name: string;
+  email: string;
+  roleName: string;
+  roleKey: string | null;
+};
+
 export type TenantEnv = {
   Variables: AppEnv['Variables'] & {
     tenant: Tenant;
+    /** The previewed person, when `x-view-as` carries a valid token. */
+    viewAs: ViewAs | null;
+    /** True when the real signed-in person is the company's Super Admin. */
+    canViewAs: boolean;
     /** Display data for the resolved company and role. */
     tenantInfo: { companyName: string; companySlug: string; roleName: string };
     appPool: pg.Pool;
@@ -43,7 +57,10 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
  * Resolves `x-company-id` against the session user's active memberships and
  * loads the role's capabilities fresh (no caching) inside `withTenant`.
  */
-export function tenantMiddleware(pools: Pools): MiddlewareHandler<TenantEnv> {
+export function tenantMiddleware(
+  pools: Pools,
+  opts: { ignoreViewAs?: boolean } = {},
+): MiddlewareHandler<TenantEnv> {
   return async (c, next) => {
     const user = c.get('user');
     if (!user) throw new AppError(401, 'unauthenticated', 'Sign in to continue.');
@@ -72,25 +89,88 @@ export function tenantMiddleware(pools: Pools): MiddlewareHandler<TenantEnv> {
       );
     }
 
-    const caps = await withTenant(pools.app, { companyId, userId: user.id }, (tx) =>
-      tx
-        .select({ capability: roleCapabilities.capability })
-        .from(roleCapabilities)
-        .where(eq(roleCapabilities.roleId, m.role_id)),
-    );
-
-    c.set('tenant', {
-      companyId,
+    const canViewAs = m.role_key === 'super_admin';
+    let who = {
       userId: user.id,
       membershipId: m.membership_id,
       roleId: m.role_id,
       roleKey: m.role_key,
+      roleName: m.role_name,
+    };
+    let viewAs: ViewAs | null = null;
+
+    // A Super Admin previewing the app as someone else: read-only, and only with a token from the
+    // audited start endpoint. The person's own menu, capabilities and data are what the app sees.
+    const token = c.req.header('x-view-as')?.trim();
+    if (token && !opts.ignoreViewAs && canViewAs) {
+      const claims = verifyViewAs(pools.viewAsSecret, token, user.id, companyId);
+      if (claims) {
+        const [target] = await withTenant(pools.app, { companyId, userId: user.id }, (tx) =>
+          tx
+            .select({
+              userId: memberships.userId,
+              roleId: memberships.roleId,
+              status: memberships.status,
+              name: users.name,
+              email: users.email,
+              roleName: roles.name,
+              roleKey: roles.key,
+            })
+            .from(memberships)
+            .innerJoin(users, eq(users.id, memberships.userId))
+            .innerJoin(
+              roles,
+              and(eq(roles.companyId, memberships.companyId), eq(roles.id, memberships.roleId)),
+            )
+            .where(and(eq(memberships.companyId, companyId), eq(memberships.id, claims.t))),
+        );
+        if (target && target.status === 'active') {
+          if (c.req.method !== 'GET' && c.req.method !== 'HEAD') {
+            throw new AppError(
+              403,
+              'read_only_view',
+              `You are viewing as ${target.name}. Exit the view to make changes.`,
+            );
+          }
+          who = {
+            userId: target.userId,
+            membershipId: claims.t,
+            roleId: target.roleId,
+            roleKey: target.roleKey,
+            roleName: target.roleName,
+          };
+          viewAs = {
+            membershipId: claims.t,
+            name: target.name,
+            email: target.email,
+            roleName: target.roleName,
+            roleKey: target.roleKey,
+          };
+        }
+      }
+    }
+
+    const caps = await withTenant(pools.app, { companyId, userId: who.userId }, (tx) =>
+      tx
+        .select({ capability: roleCapabilities.capability })
+        .from(roleCapabilities)
+        .where(eq(roleCapabilities.roleId, who.roleId)),
+    );
+
+    c.set('tenant', {
+      companyId,
+      userId: who.userId,
+      membershipId: who.membershipId,
+      roleId: who.roleId,
+      roleKey: who.roleKey,
       capabilities: new Set(caps.map((r) => r.capability as Capability)),
     });
+    c.set('viewAs', viewAs);
+    c.set('canViewAs', canViewAs);
     c.set('tenantInfo', {
       companyName: m.company_name,
       companySlug: m.company_slug,
-      roleName: m.role_name,
+      roleName: who.roleName,
     });
     c.set('appPool', pools.app);
     await next();
@@ -123,6 +203,8 @@ export function companyContextRoutes(pools: Pools): Hono<AppEnv> {
       company: { id: t.companyId, name: info.companyName, slug: info.companySlug },
       role: { id: t.roleId, name: info.roleName, key: t.roleKey },
       capabilities: [...t.capabilities].sort(),
+      canViewAs: c.get('canViewAs'),
+      viewAs: c.get('viewAs'),
     });
   });
   return r as unknown as Hono<AppEnv>;

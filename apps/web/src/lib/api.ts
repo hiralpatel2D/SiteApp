@@ -1,4 +1,5 @@
 import { getActiveCompany } from './company';
+import { getViewAsToken } from './viewas';
 
 const UNAVAILABLE = 'The service is busy. Try again shortly.';
 
@@ -60,6 +61,8 @@ export async function api<T>(path: string, opts: ApiOptions = {}): Promise<T> {
   const headers = new Headers({ accept: 'application/json' });
   const company = opts.company === undefined ? getActiveCompany() : opts.company;
   if (company) headers.set('x-company-id', company);
+  const viewAs = getViewAsToken(company ?? null);
+  if (viewAs) headers.set('x-view-as', viewAs);
   const hasBody = opts.body !== undefined;
   if (hasBody) headers.set('content-type', 'application/json');
 

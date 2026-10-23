@@ -16,6 +16,7 @@ import { platformRoutes } from './platform/routes';
 import { projectRoutes } from './projects/routes';
 import { roleRoutes } from './roles/routes';
 import { companyContextRoutes } from './tenant/context';
+import { viewAsRoutes } from './tenant/view-as';
 import { userRoutes } from './users/routes';
 
 export type AppDeps = {
@@ -59,6 +60,7 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
   api.use('*', sessionMiddleware(auth));
   api.route('/', meRoutes(deps.pools, auth));
   api.route('/', companyContextRoutes(deps.pools));
+  api.route('/', viewAsRoutes(deps.pools));
   api.route('/invitations', invitationRoutes({ ...deps, auth }));
   api.route('/platform', platformRoutes(deps));
   api.route('/users', userRoutes(deps.pools));
