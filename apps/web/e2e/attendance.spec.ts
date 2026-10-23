@@ -287,7 +287,7 @@ test('attendance: set up the site, register and approve faces, check in inside a
   await expect(people.getByRole('listitem').filter({ hasText: FAR_ENGINEER.name })).toContainText(
     'Present 1',
   );
-  const dayTable = a.getByRole('table', { name: 'Day by day' });
+  const dayTable = a.getByRole('table', { name: /^Day by day, \w+ \d{4}$/ });
   await expect(dayTable.getByRole('rowheader', { name: ENGINEER.name })).toBeVisible();
   await expect(dayTable.getByRole('columnheader').nth(1)).toContainText('01');
   await noHorizontalScroll(a);

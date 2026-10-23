@@ -34,6 +34,14 @@ function Summary() {
   );
 }
 
+/** "October 2026" for a `YYYY-MM` month. */
+export const monthTitle = (month: string) =>
+  new Date(`${month}-01T00:00:00Z`).toLocaleDateString('en-GB', {
+    month: 'long',
+    year: 'numeric',
+    timeZone: 'UTC',
+  });
+
 const weekday = (d: string) =>
   new Date(`${d}T00:00:00Z`).toLocaleDateString('en-GB', { weekday: 'short', timeZone: 'UTC' });
 
@@ -43,10 +51,13 @@ function DayTable({ data }: { data: MonthlySummary }) {
   return (
     <div className="flex flex-col gap-2">
       <h2 className="font-display text-[20px] font-extrabold uppercase leading-tight">
-        Day by day
+        {`Day by day · ${monthTitle(data.month)}`}
       </h2>
       <div className="overflow-x-auto rounded-[var(--r)] border border-line-soft bg-card">
-        <table aria-label="Day by day" className="border-separate border-spacing-0 text-xs">
+        <table
+          aria-label={`Day by day, ${monthTitle(data.month)}`}
+          className="border-separate border-spacing-0 text-xs"
+        >
           <thead>
             <tr>
               <th
@@ -180,6 +191,7 @@ function SummaryBody() {
           </p>
         ) : (
           <>
+            <p className="font-medium">{monthTitle(data.month)}</p>
             <p className="text-sm text-muted">
               P present · L late (counted in present) · ? waiting for approval · A absent
             </p>

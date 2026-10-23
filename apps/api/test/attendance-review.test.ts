@@ -489,6 +489,10 @@ describe('attendance pending review', () => {
       const wb = new ExcelJS.Workbook();
       await wb.xlsx.load(Buffer.from(await res.arrayBuffer()) as unknown as ArrayBuffer);
       expect(wb.worksheets.map((w) => w.name)).toEqual(['Summary', 'Daily', 'Entries']);
+      expect(wb.getWorksheet('Daily')!.getRow(1).getCell(1).value).toBe('Name · October 2026');
+      expect(String(wb.getWorksheet('Summary')!.getRow(1).getCell(1).value)).toContain(
+        'October 2026',
+      );
       const entries = wb.getWorksheet('Entries')!;
       expect(entries.getRow(2).getCell(2).value).toBe('w');
       expect(entries.getRow(2).getCell(5).value).toBe('pending');

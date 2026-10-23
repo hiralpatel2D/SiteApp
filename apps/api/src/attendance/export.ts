@@ -32,9 +32,14 @@ export async function buildWorkbook(input: {
   const wb = new ExcelJS.Workbook();
   wb.creator = 'Site Diary';
   const bold = { bold: true };
+  const monthName = new Date(`${summary.month}-01T00:00:00Z`).toLocaleDateString('en-GB', {
+    month: 'long',
+    year: 'numeric',
+    timeZone: 'UTC',
+  });
 
   const totals = wb.addWorksheet('Summary');
-  totals.addRow([safeCell(`${input.projectName} - attendance ${summary.month}`)]).font = {
+  totals.addRow([safeCell(`${input.projectName} - attendance ${monthName}`)]).font = {
     bold: true,
     size: 14,
   };
@@ -67,7 +72,10 @@ export async function buildWorkbook(input: {
   const grid = wb.addWorksheet('Daily');
   const dayName = (d: string) =>
     new Date(`${d}T00:00:00Z`).toLocaleDateString('en-GB', { weekday: 'short', timeZone: 'UTC' });
-  grid.addRow(['Name', ...summary.days.map((d) => `${d.slice(8)} ${dayName(d)}`)]).font = bold;
+  grid.addRow([
+    `Name · ${monthName}`,
+    ...summary.days.map((d) => `${d.slice(8)} ${dayName(d)}`),
+  ]).font = bold;
   for (const p of summary.people) {
     grid.addRow([
       safeCell(p.name),
