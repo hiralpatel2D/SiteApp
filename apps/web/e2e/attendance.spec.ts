@@ -254,8 +254,9 @@ test('attendance: set up the site, register and approve faces, check in inside a
   await e.goto('/attendance');
   await e.getByRole('link', { name: 'Attendance log' }).click();
   await expect(e).toHaveURL(/\/attendance\/log$/);
-  const mine = e.getByRole('list', { name: 'Attendance by day' });
-  await expect(mine).toContainText(/In \d\d:\d\d · Recorded/, SLOW);
+  const mine = e.getByRole('table', { name: 'Attendance log' });
+  await expect(mine).toContainText(/\d\d:\d\d/, SLOW);
+  await expect(mine).toContainText('Recorded');
   await expect(mine).not.toContainText(FAR_ENGINEER.name);
   await expect(e.getByRole('tab', { name: 'Everyone' })).toHaveCount(0);
   await expect(e.getByRole('link', { name: 'Monthly summary' })).toHaveCount(0);
@@ -272,24 +273,19 @@ test('attendance: set up the site, register and approve faces, check in inside a
   await a.goto('/attendance');
   await a.getByRole('link', { name: 'Attendance log' }).click();
   await a.getByRole('tab', { name: 'Everyone' }).click();
-  const everyone = a.getByRole('list', { name: 'Attendance by day' });
+  const everyone = a.getByRole('table', { name: 'Attendance log' });
   await expect(everyone).toContainText(ENGINEER.name, SLOW);
   await expect(everyone).toContainText(FAR_ENGINEER.name);
   await expect(everyone).toContainText('Approved');
   await noHorizontalScroll(a);
   await a.getByRole('link', { name: 'Monthly summary' }).click();
   await expect(a).toHaveURL(/\/attendance\/summary$/);
-  const people = a.getByRole('list', { name: 'People' });
-  await expect(people).toContainText(ENGINEER.name, SLOW);
-  await expect(people.getByRole('listitem').filter({ hasText: ENGINEER.name })).toContainText(
-    'Present 1',
-  );
-  await expect(people.getByRole('listitem').filter({ hasText: FAR_ENGINEER.name })).toContainText(
-    'Present 1',
-  );
   const dayTable = a.getByRole('table', { name: /^Day by day, \w+ \d{4}$/ });
+  await expect(dayTable).toContainText(ENGINEER.name, SLOW);
+  await expect(dayTable.getByRole('row').filter({ hasText: ENGINEER.name })).toContainText('1');
+  await expect(dayTable.getByRole('row').filter({ hasText: FAR_ENGINEER.name })).toContainText('1');
   await expect(dayTable.getByRole('rowheader', { name: ENGINEER.name })).toBeVisible();
-  await expect(dayTable.getByRole('columnheader').nth(1)).toContainText('01');
+  await expect(dayTable.getByRole('columnheader', { name: /^01\s*\w\w$/ })).toBeVisible();
   await noHorizontalScroll(a);
   const [download] = await Promise.all([
     a.waitForEvent('download'),
@@ -303,10 +299,10 @@ test('attendance: set up the site, register and approve faces, check in inside a
   const prior = new Date();
   prior.setUTCMonth(prior.getUTCMonth() - 1, 1);
   await a.getByLabel('Month').fill(prior.toISOString().slice(0, 7));
-  await expect(people).toContainText(ENGINEER.name, SLOW);
-  await expect(people.getByRole('listitem').filter({ hasText: ENGINEER.name })).toContainText(
-    'Present 0',
-  );
+  await expect(dayTable).toContainText(ENGINEER.name, SLOW);
+  await expect(
+    dayTable.getByRole('row').filter({ hasText: ENGINEER.name }).getByRole('cell').first(),
+  ).toHaveText('0');
   await a.getByRole('button', { name: 'Open menu' }).click();
   const adminMenu = a.getByRole('navigation', { name: 'Main menu' });
   for (const name of ['Attendance log', 'Monthly summary', 'Approvals', 'Site settings']) {
@@ -332,8 +328,9 @@ test('attendance: set up the site, register and approve faces, check in inside a
 
   // What the engineer sees: their own log, no Everyone tab, no approvals or summary.
   await a.goto('/attendance/log');
-  const viewed = a.getByRole('list', { name: 'Attendance by day' });
-  await expect(viewed).toContainText(/In \d\d:\d\d · Recorded/, SLOW);
+  const viewed = a.getByRole('table', { name: 'Attendance log' });
+  await expect(viewed).toContainText(/\d\d:\d\d/, SLOW);
+  await expect(viewed).toContainText('Recorded');
   await expect(viewed).not.toContainText(FAR_ENGINEER.name);
   await expect(a.getByRole('tab', { name: 'Everyone' })).toHaveCount(0);
   await a.goto('/attendance/approvals');
