@@ -1,5 +1,5 @@
-import { and, eq, sql } from 'drizzle-orm';
-import { memberships, projectAssignments, projects } from '../db/schema';
+import { and, eq, ne, sql } from 'drizzle-orm';
+import { memberships, projectAssignments, projects, roleCapabilities } from '../db/schema';
 import type { AppTx } from '../db/tenant';
 import type { Tenant } from '../tenant/context';
 
@@ -42,4 +42,32 @@ export async function sharesProject(tx: AppTx, t: Tenant, membershipId: string):
        and b.membership_id = ${membershipId}
      limit 1`);
   return res.rows.length > 0;
+}
+
+/**
+ * True when another active member of the company holds `capability`. A person may decide their
+ * own face registration or check-in only when this is false (the first owner, before anyone else
+ * can); once a second person holds the capability, someone else must decide.
+ */
+export async function hasOtherHolder(tx: AppTx, t: Tenant, capability: string): Promise<boolean> {
+  const [other] = await tx
+    .select({ id: memberships.id })
+    .from(memberships)
+    .innerJoin(
+      roleCapabilities,
+      and(
+        eq(roleCapabilities.companyId, memberships.companyId),
+        eq(roleCapabilities.roleId, memberships.roleId),
+      ),
+    )
+    .where(
+      and(
+        eq(memberships.companyId, t.companyId),
+        eq(memberships.status, 'active'),
+        ne(memberships.id, t.membershipId),
+        eq(roleCapabilities.capability, capability),
+      ),
+    )
+    .limit(1);
+  return !!other;
 }

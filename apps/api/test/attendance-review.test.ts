@@ -28,6 +28,8 @@ const SITE = { lat: 19.07, lng: 72.87 };
 const EARLY = new Date('2026-10-16T03:25:00Z');
 
 type Pending = {
+  own: boolean;
+  canDecide: boolean;
   id: string;
   name: string;
   projectName: string;
@@ -183,7 +185,7 @@ describe('attendance pending review', () => {
       .where(eq(auditLog.action, 'attendance.approved'));
     expect(a!.entityId).toBe(id);
     expect(a!.before).toEqual({ status: 'pending' });
-    expect(a!.after).toEqual({ status: 'approved', note: 'Seen on site' });
+    expect(a!.after).toEqual({ status: 'approved', note: 'Seen on site', selfDecided: false });
     expect(JSON.stringify(a)).not.toContain('AQID');
   });
 
@@ -198,10 +200,28 @@ describe('attendance pending review', () => {
     expect((await asCoord(ctx, '/pending/not-a-uuid/approve', 'POST', {})).status).toBe(404);
   });
 
-  it('excludes own entries from the list and forbids self-decision', async () => {
+  it('lists your own entry and lets the only reviewer decide it, audited', async () => {
     const ctx = await setup();
     const own = await pendingEntry(ctx, { membershipId: ctx.coord.membershipId });
-    expect(await list(ctx)).toHaveLength(0);
+    const rows = await list(ctx);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ id: own, own: true, canDecide: true });
+    const res = await asCoord(ctx, `/pending/${own}/approve`, 'POST', {});
+    expect(res.status).toBe(200);
+    const [a] = await ownerDb
+      .select()
+      .from(auditLog)
+      .where(eq(auditLog.action, 'attendance.approved'));
+    expect(a!.after).toMatchObject({ selfDecided: true });
+  });
+
+  it('lists your own entry but forbids self-decision while another reviewer exists', async () => {
+    const ctx = await setup();
+    await seedMember(ctx.co.companyId, 'coordinator', 'c2@alpha.test', { app: ctx.app });
+    const own = await pendingEntry(ctx, { membershipId: ctx.coord.membershipId });
+    const rows = await list(ctx);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ id: own, own: true, canDecide: false });
     const res = await asCoord(ctx, `/pending/${own}/approve`, 'POST', {});
     expect(res.status).toBe(403);
     expect((await errorOf(res)).code).toBe('forbidden');
@@ -248,7 +268,7 @@ describe('attendance pending review', () => {
       .select()
       .from(auditLog)
       .where(eq(auditLog.action, 'attendance.rejected'));
-    expect(a!.after).toEqual({ status: 'rejected', note: 'No' });
+    expect(a!.after).toEqual({ status: 'rejected', note: 'No', selfDecided: false });
 
     const again = await asWorker(ctx, '/check', 'POST', { ...checkBody, lat: SITE.lat });
     expect(again.status).toBe(200);

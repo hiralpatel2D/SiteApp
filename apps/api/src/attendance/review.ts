@@ -1,5 +1,5 @@
 import { Hono, type Context } from 'hono';
-import { and, asc, count, eq, exists, ne, sql } from 'drizzle-orm';
+import { and, asc, count, eq, exists, sql } from 'drizzle-orm';
 import { reviewDecisionBodySchema } from '@sitediary/shared';
 import { writeAudit } from '../audit/audit';
 import type { AppEnv } from '../auth/session';
@@ -16,7 +16,7 @@ import { parseBody } from '../http/body';
 import { AppError } from '../http/errors';
 import { forbidden } from '../roles/authz';
 import { requireCap, runInTenant, type Tenant, type TenantEnv } from '../tenant/context';
-import { canSeeProject } from './reach';
+import { canSeeProject, hasOtherHolder } from './reach';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const notFound = () => new AppError(404, 'not_found', 'Not found.');
@@ -25,7 +25,10 @@ const alreadyDecided = () =>
 
 const dataUrl = (b: Buffer) => `data:image/jpeg;base64,${b.toString('base64')}`;
 
-/** Locks the entry the reviewer may decide: 404 out of reach, 403 own, 409 not pending. */
+/**
+ * Locks the entry the reviewer may decide: 404 out of reach, 403 own (unless they are the only
+ * reviewer), 409 not pending.
+ */
 async function loadDecidable(tx: AppTx, t: Tenant, rawId: string) {
   const id = rawId.toLowerCase();
   if (!UUID_RE.test(id)) throw notFound();
@@ -41,9 +44,10 @@ async function loadDecidable(tx: AppTx, t: Tenant, rawId: string) {
     .from(memberships)
     .where(and(eq(memberships.companyId, t.companyId), eq(memberships.id, row.membershipId)));
   if (m?.status !== 'active') throw notFound();
-  if (row.membershipId === t.membershipId) throw forbidden();
+  const own = row.membershipId === t.membershipId;
+  if (own && (await hasOtherHolder(tx, t, 'attendance.review'))) throw forbidden();
   if (row.status !== 'pending') throw alreadyDecided();
-  return row;
+  return { row, own };
 }
 
 const PENDING_LIMIT = 50;
@@ -54,8 +58,10 @@ export function reviewRoutes(): Hono<AppEnv> {
 
   /**
    * GET /pending responds `{ entries, total }`: the oldest PENDING_LIMIT (50) pending entries the
-   * reviewer can see (own excluded), each with `photos` data URLs, and `total`, the count of all
-   * such entries. When total > entries.length, decide some and fetch again.
+   * reviewer can see, each with `photos` data URLs, `own` and `canDecide`, and `total`, the count
+   * of all such entries. Your own entries are listed so you can see them; you may decide them only
+   * when nobody else can review (see hasOtherHolder). When total > entries.length, decide some
+   * and fetch again.
    */
   r.get('/pending', requireCap('attendance.review'), async (c) => {
     const t = c.get('tenant');
@@ -77,7 +83,6 @@ export function reviewRoutes(): Hono<AppEnv> {
       const where = and(
         eq(attendanceEntries.companyId, t.companyId),
         eq(attendanceEntries.status, 'pending'),
-        ne(attendanceEntries.membershipId, t.membershipId),
         reach,
       );
       const [totalRow] = await tx
@@ -92,9 +97,11 @@ export function reviewRoutes(): Hono<AppEnv> {
           ),
         )
         .where(where);
+      const soleReviewer = !(await hasOtherHolder(tx, t, 'attendance.review'));
       const rows = await tx
         .select({
           id: attendanceEntries.id,
+          membershipId: attendanceEntries.membershipId,
           name: users.name,
           projectName: projects.name,
           kind: attendanceEntries.kind,
@@ -138,10 +145,15 @@ export function reviewRoutes(): Hono<AppEnv> {
         .where(where)
         .orderBy(asc(attendanceEntries.at), asc(attendanceEntries.id))
         .limit(PENDING_LIMIT);
-      const entries = rows.map(({ evidence, ...row }) => ({
-        ...row,
-        photos: (evidence ?? []).map(dataUrl),
-      }));
+      const entries = rows.map(({ evidence, membershipId, ...row }) => {
+        const own = membershipId === t.membershipId;
+        return {
+          ...row,
+          own,
+          canDecide: !own || soleReviewer,
+          photos: (evidence ?? []).map(dataUrl),
+        };
+      });
       return { entries, total: totalRow?.n ?? 0 };
     });
     return c.json(out);
@@ -154,7 +166,7 @@ export function reviewRoutes(): Hono<AppEnv> {
       const t = c.get('tenant');
       const note = body.note ? body.note : null;
       await runInTenant(c, async (tx) => {
-        const row = await loadDecidable(tx, t, c.req.param('id')!);
+        const { row, own } = await loadDecidable(tx, t, c.req.param('id')!);
         await tx
           .update(attendanceEntries)
           .set({
@@ -170,7 +182,7 @@ export function reviewRoutes(): Hono<AppEnv> {
           entity: 'attendance_entry',
           entityId: row.id,
           before: { status: 'pending' },
-          after: { status, note },
+          after: { status, note, selfDecided: own },
         });
       });
       return c.json({ status });

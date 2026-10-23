@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
-import { and, asc, eq, ne } from 'drizzle-orm';
+import { and, asc, eq } from 'drizzle-orm';
 import {
   faceRegistrationBodySchema,
   MIN_FACE_WIDTH_PX,
@@ -10,7 +10,7 @@ import {
 import { writeAudit } from '../audit/audit';
 import type { AppEnv } from '../auth/session';
 import type { Config } from '../config';
-import { faceRegistrations, memberships, roleCapabilities, users } from '../db/schema';
+import { faceRegistrations, memberships, users } from '../db/schema';
 import type { AppTx } from '../db/tenant';
 import { parseBody } from '../http/body';
 import { isUniqueViolation } from '../db/errors';
@@ -18,10 +18,10 @@ import { AppError } from '../http/errors';
 import { forbidden } from '../roles/authz';
 import { requireCap, runInTenant, type Tenant, type TenantEnv } from '../tenant/context';
 import type { FaceEngine, FaceReading } from './face/engine';
-import { SAME_PERSON_MIN } from './face/frames';
+import { hasDuplicateFrames, SAME_PERSON_MIN } from './face/frames';
 import { ipBackstop, memberLimit } from './limits';
 import { averageEmbedding, encryptTemplate } from './face/template';
-import { sharesProject } from './reach';
+import { hasOtherHolder, sharesProject } from './reach';
 
 const REGISTER_LIMIT = { max: 5, windowMs: 60_000 };
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
@@ -56,33 +56,6 @@ const isClear = (r: FaceReading, minLiveness: number) =>
   r.real >= minLiveness &&
   r.live >= minLiveness &&
   r.embedding !== null;
-
-/**
- * True when another active member of the company holds `attendance.approve_face`. A person may
- * decide their own registration only when this is false (the first owner, before anyone else can).
- */
-async function hasOtherApprover(tx: AppTx, t: Tenant): Promise<boolean> {
-  const [other] = await tx
-    .select({ id: memberships.id })
-    .from(memberships)
-    .innerJoin(
-      roleCapabilities,
-      and(
-        eq(roleCapabilities.companyId, memberships.companyId),
-        eq(roleCapabilities.roleId, memberships.roleId),
-      ),
-    )
-    .where(
-      and(
-        eq(memberships.companyId, t.companyId),
-        eq(memberships.status, 'active'),
-        ne(memberships.id, t.membershipId),
-        eq(roleCapabilities.capability, 'attendance.approve_face'),
-      ),
-    )
-    .limit(1);
-  return !!other;
-}
 
 export type FaceStatus = 'none' | 'pending' | 'approved' | 'rejected';
 
@@ -160,8 +133,7 @@ export function registrationRoutes({ config, faceEngine }: RegistrationDeps): Ho
       // One photo sent several times is not a live registration. Near-identical photos are
       // allowed here (a still person gives them); only exact copies are refused.
       const clearJpegs = keep.map((i) => jpegs[i]!);
-      if (clearJpegs.some((a, i) => clearJpegs.some((b, j) => j > i && a.equals(b))))
-        throw identical();
+      if (hasDuplicateFrames(clearJpegs)) throw identical();
       const embeddings = keep.map((i) => readings[i]!.embedding!);
       for (let i = 0; i < embeddings.length; i++) {
         for (let j = i + 1; j < embeddings.length; j++) {
@@ -265,8 +237,8 @@ export function registrationRoutes({ config, faceEngine }: RegistrationDeps): Ho
         )
         .orderBy(asc(faceRegistrations.createdAt));
       // Your own registration is listed so you can see your photo; you may decide it only when
-      // nobody else can (see hasOtherApprover).
-      const soleApprover = !(await hasOtherApprover(tx, t));
+      // nobody else can (see hasOtherHolder).
+      const soleApprover = !(await hasOtherHolder(tx, t, 'attendance.approve_face'));
       const out = [];
       for (const row of list) {
         const own = row.membershipId === t.membershipId;
@@ -304,7 +276,7 @@ export function registrationRoutes({ config, faceEngine }: RegistrationDeps): Ho
       .for('update');
     if (!row) throw notFound();
     const own = row.membershipId === t.membershipId;
-    if (own && (await hasOtherApprover(tx, t))) throw forbidden();
+    if (own && (await hasOtherHolder(tx, t, 'attendance.approve_face'))) throw forbidden();
     const [m] = await tx
       .select({ status: memberships.status })
       .from(memberships)

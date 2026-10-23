@@ -412,7 +412,7 @@ describe('attendance check-in / check-out', () => {
     expect(row!.evidence).toHaveLength(3);
   });
 
-  it('near-identical frames (32×32 grey downscale) are pending as Liveness failed', async () => {
+  it('near-identical frames (a still person) are not treated as a replay', async () => {
     const ctx = await setup({
       readings: {
         1: { thumb: new Uint8Array(1024).fill(100) },
@@ -420,7 +420,7 @@ describe('attendance check-in / check-out', () => {
       },
     });
     const body = (await (await check(ctx, 'check_in')).json()) as CheckResult;
-    expect(body.reasons).toEqual(['Liveness failed']);
+    expect(body).toMatchObject({ status: 'recorded', reasons: [] });
   });
 
   it('different photos whose embeddings are all identical still record', async () => {
