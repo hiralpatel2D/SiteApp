@@ -2,6 +2,7 @@ import { pathToFileURL } from 'node:url';
 import { and, eq, inArray, like } from 'drizzle-orm';
 import { SYSTEM_ROLES, newId, type SystemRoleKey } from '@sitediary/shared';
 import { createAuth } from '../auth/auth';
+import { createCompany } from '../companies/create-company';
 import { loadConfig, type Config } from '../config';
 import { createPools, type Pools } from '../db/pools';
 import {
@@ -24,6 +25,7 @@ import {
  */
 export const TEST_EMAIL_DOMAIN = 'sitediary-test.example';
 export const DEFAULT_TEST_PASSWORD = 'TestEmployee#2026';
+export const TEST_WORKSPACE = { name: 'Test Workspace', slug: 'test-workspace' } as const;
 
 /** One per system role, except Super Admin and Admin (none of the test staff may administer). */
 const ADMIN_KEYS: readonly SystemRoleKey[] = ['super_admin', 'admin'];
@@ -40,10 +42,18 @@ export type SeedResult = {
   projects: number;
 };
 
-async function findCompany(pools: Pools, slug: string) {
-  const [company] = await pools.ownerDb.select().from(companies).where(eq(companies.slug, slug));
-  if (!company) throw new Error(`No company with workspace name "${slug}".`);
-  return company;
+async function findCompany(pools: Pools, slug: string, createIfMissing: boolean) {
+  const find = async () =>
+    (await pools.ownerDb.select().from(companies).where(eq(companies.slug, slug)))[0];
+  const existing = await find();
+  if (existing) return existing;
+  if (!createIfMissing) throw new Error(`No company with workspace name "${slug}".`);
+  // A fresh workspace: the nine system roles plus one sample project to assign people to.
+  const { companyId } = await createCompany(pools.ownerDb, { name: TEST_WORKSPACE.name, slug });
+  await pools.ownerDb
+    .insert(projects)
+    .values({ id: newId(), companyId, name: 'Test Site', code: 'TEST', status: 'active' });
+  return (await find())!;
 }
 
 /**
@@ -54,10 +64,10 @@ async function findCompany(pools: Pools, slug: string) {
  */
 export async function seedTestEmployees(
   deps: { pools: Pools; config: Config },
-  input: { companySlug: string; password?: string },
+  input: { companySlug: string; password?: string; createIfMissing?: boolean },
 ): Promise<SeedResult> {
   const { ownerDb } = deps.pools;
-  const company = await findCompany(deps.pools, input.companySlug);
+  const company = await findCompany(deps.pools, input.companySlug, input.createIfMissing ?? false);
   const password = input.password ?? DEFAULT_TEST_PASSWORD;
 
   // Hash with Better Auth's own hasher, so sign-in verifies it.
@@ -198,17 +208,20 @@ async function main(argv: string[]): Promise<void> {
     return i >= 0 ? rest[i + 1] : undefined;
   };
   const usage =
-    'Usage: test-employees seed --company <workspace> [--password <pw>] | remove | list';
+    'Usage: test-employees seed [--company <workspace>] [--password <pw>] | remove | list';
   if (command !== 'seed' && command !== 'remove' && command !== 'list') throw new Error(usage);
 
   const config = loadConfig(process.env);
   const pools = createPools(config);
   try {
     if (command === 'seed') {
-      const companySlug = flag('company');
-      if (!companySlug) throw new Error(usage);
+      // No --company: use (and create if needed) the separate Test Workspace.
+      const companySlug = flag('company') ?? TEST_WORKSPACE.slug;
       const password = flag('password') ?? DEFAULT_TEST_PASSWORD;
-      const r = await seedTestEmployees({ pools, config }, { companySlug, password });
+      const r = await seedTestEmployees(
+        { pools, config },
+        { companySlug, password, createIfMissing: companySlug === TEST_WORKSPACE.slug },
+      );
       console.table(r.created);
       if (r.skipped.length > 0) console.log(`Already existed, left alone: ${r.skipped.join(', ')}`);
       console.log(

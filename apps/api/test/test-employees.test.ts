@@ -60,6 +60,22 @@ describe('test employees', () => {
     expect(again.skipped).toHaveLength(7);
   });
 
+  it('creates the Test Workspace with a project when asked, and reuses it', async () => {
+    const r = await seedTestEmployees(deps, {
+      companySlug: 'test-workspace',
+      createIfMissing: true,
+    });
+    expect(r.created).toHaveLength(7);
+    expect(r.projects).toBe(1);
+    await removeTestEmployees(pools);
+    const again = await seedTestEmployees(deps, {
+      companySlug: 'test-workspace',
+      createIfMissing: true,
+    });
+    expect(again.created).toHaveLength(7);
+    expect(await ownerDb.select().from(projects)).toHaveLength(1);
+  });
+
   it('rejects an unknown company', async () => {
     await expect(seedTestEmployees(deps, { companySlug: 'nope' })).rejects.toThrow(/No company/);
   });
